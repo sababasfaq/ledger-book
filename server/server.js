@@ -1,0 +1,553 @@
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import { db } from "./db.js";
+import { authRequired, superAdminOnly } from "./middleware.js";
+import {
+  createToken,
+  hashPassword,
+  verifyPassword,
+} from "./auth.js";
+
+dotenv.config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const tableFor = (t) =>
+  t === "general"
+    ? "general_ledger"
+    : t === "unofficial"
+    ? "unofficial_ledger"
+    : t === "association"
+    ? "association_ledger"
+    : t === "departmental"
+    ? "departmental_ledger"
+    : null;
+
+const parseTaxTypeId = (value) => {
+  if (value === "" || value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+function userDto(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    email: user.email,
+    pictureUrl: user.picture_url || "",
+    info: user.info || "",
+  };
+}
+
+function logAction(userId, tableName, action, rowId) {
+  try {
+    const user = db
+      .prepare("SELECT name, role FROM users WHERE id = ?")
+      .get(userId);
+    const userName = user?.name || "";
+    const role = user?.role || "";
+    db.prepare(
+      "INSERT INTO logs (user_id, user_name, role, table_name, action, row_id) VALUES (?,?,?,?,?,?)"
+    ).run(userId, userName, role, tableName, action, rowId ?? null);
+  } catch (err) {
+    console.error("Failed to log action:", err);
+  }
+}
+
+(async () => {
+  const admin = db.prepare(`SELECT * FROM users WHERE role='super_admin'`).get();
+  if (!admin) {
+    const pass = process.env.ADMIN_PASSWORD || "admin123";
+    const password_hash = await hashPassword(pass);
+    db.prepare(`
+      INSERT INTO users (name,email,picture_url,info,role,approved,password_hash,require_2fa)
+      VALUES ('Chairman','chairman@example.com','','Super Admin','super_admin',1,?,0)
+    `).run(password_hash);
+    console.log(
+      "✅ Seeded super admin: chairman@example.com | password:",
+      process.env.ADMIN_PASSWORD || "admin123"
+    );
+  }
+})();
+
+// AUTH
+
+app.post("/api/signup", async (req, res) => {
+  const { name, email, password, pictureUrl, info } = req.body || {};
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: "name, email, password required" });
+  }
+
+  const exists = db.prepare(`SELECT 1 FROM users WHERE email=?`).get(email);
+  if (exists) return res.status(409).json({ error: "Email already exists" });
+
+  const password_hash = await hashPassword(password);
+  db.prepare(`
+    INSERT INTO users (name,email,picture_url,info,role,approved,password_hash,require_2fa)
+    VALUES (?,?,?,?, 'official', 0, ?, 0)
+  `).run(name, email, pictureUrl || "", info || "", password_hash);
+
+  res.json({
+    ok: true,
+    message: "Account created. Waiting for Super Admin approval.",
+  });
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password required" });
+  }
+
+  const user =
+    db.prepare(`SELECT * FROM users WHERE email=?`).get(username) ||
+    db.prepare(`SELECT * FROM users WHERE name=?`).get(username);
+
+  if (!user) return res.status(404).json({ error: "No account found." });
+
+  const okPass = await verifyPassword(password, user.password_hash);
+  if (!okPass) return res.status(401).json({ error: "Invalid credentials" });
+
+  if (!user.approved) {
+    return res
+      .status(403)
+      .json({ error: "Approval pending", pendingApproval: true });
+  }
+
+  const token = createToken(user);
+  res.json({
+    ok: true,
+    token,
+    user: userDto(user),
+  });
+});
+
+// PROFILE
+
+app.get("/api/me", authRequired, (req, res) => {
+  const user = db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  res.json(userDto(user));
+});
+
+app.patch("/api/me", authRequired, (req, res) => {
+  const current = db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id);
+  if (!current) return res.status(404).json({ error: "User not found" });
+
+  const {
+    name = current.name,
+    pictureUrl = current.picture_url || "",
+    info = current.info || "",
+  } = req.body || {};
+
+  if (!String(name || "").trim()) {
+    return res.status(400).json({ error: "Name is required" });
+  }
+
+  db.prepare(
+    `UPDATE users SET name=?, picture_url=?, info=? WHERE id=?`
+  ).run(
+    String(name).trim(),
+    String(pictureUrl || "").trim(),
+    String(info || ""),
+    req.user.id
+  );
+
+  const updated = db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id);
+  res.json({ ok: true, user: userDto(updated) });
+});
+
+// ADMIN
+
+app.get("/api/admin/users/pending", authRequired, superAdminOnly, (_req, res) => {
+  const list = db
+    .prepare(`SELECT id,name,email,info,picture_url FROM users WHERE approved=0`)
+    .all();
+  res.json(list);
+});
+
+app.get("/api/admin/users", authRequired, superAdminOnly, (_req, res) => {
+  const list = db
+    .prepare(`SELECT id,name,email,role,approved,picture_url,info FROM users WHERE approved=1`)
+    .all();
+  res.json(list);
+});
+
+app.post("/api/admin/users/:id/approve", authRequired, superAdminOnly, (req, res) => {
+  db.prepare(`UPDATE users SET approved=1 WHERE id=?`).run(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+app.delete("/api/admin/users/:id", authRequired, superAdminOnly, (req, res) => {
+  db.prepare(`DELETE FROM users WHERE id=?`).run(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/logs", authRequired, superAdminOnly, (_req, res) => {
+  const rows = db
+    .prepare(`
+      SELECT id, user_id, user_name, role, table_name, action, row_id, created_at
+      FROM logs
+      ORDER BY created_at DESC
+    `)
+    .all();
+  res.json(rows);
+});
+
+// TAX TYPES
+
+app.get("/api/taxes", authRequired, (_req, res) => {
+  const rows = db
+    .prepare(`SELECT id, name, percentage FROM tax_types ORDER BY name ASC`)
+    .all();
+  res.json(rows);
+});
+
+app.post("/api/taxes", authRequired, superAdminOnly, (req, res) => {
+  const { name, percentage } = req.body || {};
+
+  if (!name || percentage == null || percentage === "") {
+    return res.status(400).json({ error: "name and percentage are required" });
+  }
+
+  const out = db
+    .prepare(`INSERT INTO tax_types (name, percentage) VALUES (?, ?)`)
+    .run(String(name).trim(), Number(percentage));
+
+  res.json({ ok: true, id: out.lastInsertRowid });
+});
+
+app.patch("/api/taxes/:id", authRequired, superAdminOnly, (req, res) => {
+  const { id } = req.params;
+  const { name, percentage } = req.body || {};
+
+  if (!name || percentage == null || percentage === "") {
+    return res.status(400).json({ error: "name and percentage are required" });
+  }
+
+  db.prepare(`UPDATE tax_types SET name=?, percentage=? WHERE id=?`).run(
+    String(name).trim(),
+    Number(percentage),
+    Number(id)
+  );
+
+  res.json({ ok: true });
+});
+
+app.delete("/api/taxes/:id", authRequired, superAdminOnly, (req, res) => {
+  const taxId = Number(req.params.id);
+
+  db.prepare(`UPDATE general_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
+  db.prepare(`UPDATE unofficial_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
+  db.prepare(`UPDATE association_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
+  db.prepare(`UPDATE departmental_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
+  db.prepare(`DELETE FROM tax_types WHERE id=?`).run(taxId);
+
+  res.json({ ok: true });
+});
+
+// LEDGERS
+
+app.get("/api/ledger/:type", authRequired, (req, res) => {
+  const tbl = tableFor(req.params.type);
+  if (!tbl) return res.status(400).json({ error: "invalid type" });
+
+  const rows = db
+    .prepare(`
+      SELECT
+        l.*,
+        u.name AS addedByName,
+        u.role AS addedByRole,
+        t.id AS taxTypeId,
+        t.name AS taxTypeName,
+        t.percentage AS taxPercentage
+      FROM ${tbl} AS l
+      LEFT JOIN users u ON l.created_by = u.id
+      LEFT JOIN tax_types t ON l.tax_type_id = t.id
+      ORDER BY l.date ASC, l.no ASC
+    `)
+    .all();
+
+  res.json(rows);
+});
+
+app.post("/api/ledger/:type", authRequired, (req, res) => {
+  const tbl = tableFor(req.params.type);
+  if (!tbl) return res.status(400).json({ error: "invalid type" });
+
+  const { date, voucherNo, deposit, cost, description, signature, taxTypeId } =
+    req.body || {};
+
+  if (!date || !voucherNo) {
+    return res.status(400).json({ error: "date and voucherNo are required" });
+  }
+
+  if ((deposit == null || deposit === "") && (cost == null || cost === "")) {
+    return res.status(400).json({ error: "Either deposit or cost must be provided" });
+  }
+
+  const last = db
+    .prepare(`SELECT no FROM ${tbl} ORDER BY CAST(no AS INTEGER) DESC LIMIT 1`)
+    .get();
+
+  let nextNo = 1;
+  if (last && last.no != null) {
+    const parsed = parseInt(last.no, 10);
+    if (Number.isFinite(parsed)) nextNo = parsed + 1;
+  }
+  const noValue = String(nextNo).padStart(2, "0");
+
+  const out = db
+    .prepare(`
+      INSERT INTO ${tbl} (no,date,voucher_no,deposit,cost,description,signature,created_by,tax_type_id)
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `)
+    .run(
+      noValue,
+      date,
+      voucherNo,
+      deposit === "" ? null : Number(deposit),
+      cost === "" ? null : Number(cost),
+      description || "",
+      signature || "",
+      req.user.id,
+      parseTaxTypeId(taxTypeId)
+    );
+
+  logAction(req.user.id, tbl, "ADD", out.lastInsertRowid);
+
+  res.json({ ok: true, id: out.lastInsertRowid, no: noValue });
+});
+
+app.patch("/api/ledger/:type/:id", authRequired, superAdminOnly, (req, res) => {
+  const tbl = tableFor(req.params.type);
+  if (!tbl) return res.status(400).json({ error: "invalid type" });
+
+  const id = Number(req.params.id);
+  const map = { voucherNo: "voucher_no", taxTypeId: "tax_type_id" };
+  const allowed = [
+    "date",
+    "voucherNo",
+    "deposit",
+    "cost",
+    "description",
+    "signature",
+    "taxTypeId",
+  ];
+
+  const sets = [];
+  const vals = [];
+
+  for (const k of allowed) {
+    if (k in req.body) {
+      const col = map[k] || k;
+
+      if (k === "deposit" || k === "cost") {
+        const v = req.body[k];
+        vals.push(v === "" || v == null ? null : Number(v));
+      } else if (k === "taxTypeId") {
+        vals.push(parseTaxTypeId(req.body[k]));
+      } else {
+        vals.push(req.body[k]);
+      }
+
+      sets.push(`${col} = ?`);
+    }
+  }
+
+  if (!sets.length) return res.status(400).json({ error: "no fields" });
+
+  vals.push(id);
+  db.prepare(`UPDATE ${tbl} SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+  logAction(req.user.id, tbl, "EDIT", id);
+
+  res.json({ ok: true });
+});
+
+app.delete("/api/ledger/:type/:id", authRequired, superAdminOnly, (req, res) => {
+  const tbl = tableFor(req.params.type);
+  if (!tbl) return res.status(400).json({ error: "invalid type" });
+
+  const id = Number(req.params.id);
+  db.prepare(`DELETE FROM ${tbl} WHERE id=?`).run(id);
+
+  logAction(req.user.id, tbl, "DELETE", id);
+
+  res.json({ ok: true });
+});
+
+// DEPARTMENTAL COMBINED
+
+app.get("/api/departmental", authRequired, (req, res) => {
+  const include = (
+    req.query.include || "general,unofficial,association,departmental"
+  )
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  let rows = [];
+
+  if (include.includes("general")) {
+    rows = rows.concat(
+      db.prepare(`
+        SELECT 'general' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
+        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
+        FROM general_ledger l
+        LEFT JOIN tax_types t ON l.tax_type_id=t.id
+      `).all()
+    );
+  }
+
+  if (include.includes("unofficial")) {
+    rows = rows.concat(
+      db.prepare(`
+        SELECT 'unofficial' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
+        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
+        FROM unofficial_ledger l
+        LEFT JOIN tax_types t ON l.tax_type_id=t.id
+      `).all()
+    );
+  }
+
+  if (include.includes("association")) {
+    rows = rows.concat(
+      db.prepare(`
+        SELECT 'association' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
+        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
+        FROM association_ledger l
+        LEFT JOIN tax_types t ON l.tax_type_id=t.id
+      `).all()
+    );
+  }
+
+  if (include.includes("departmental")) {
+    rows = rows.concat(
+      db.prepare(`
+        SELECT 'departmental' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
+        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
+        FROM departmental_ledger l
+        LEFT JOIN tax_types t ON l.tax_type_id=t.id
+      `).all()
+    );
+  }
+
+  rows = rows.map((r) => ({
+    ...r,
+    deposit: r.deposit == null ? null : Number(r.deposit),
+    cost: r.cost == null ? null : Number(r.cost),
+    voucherNo: r.voucher_no,
+  }));
+
+  rows.sort((a, b) => {
+    if (a.date < b.date) return -1;
+    if (a.date > b.date) return 1;
+    return String(a.no).localeCompare(String(b.no));
+  });
+
+  rows = rows.map((r, i) => ({ ...r, combinedNo: i + 1 }));
+
+  res.json(rows);
+});
+
+// TAX RETURN CHALLAN
+
+app.get("/api/tax-return-challan", authRequired, (_req, res) => {
+  const rows = db
+    .prepare(`
+      SELECT *
+      FROM tax_return_challans
+      ORDER BY created_at DESC, id DESC
+    `)
+    .all();
+  res.json(rows);
+});
+
+app.post("/api/tax-return-challan", authRequired, (req, res) => {
+  const {
+    challanNo,
+    date,
+    zone,
+    circle,
+    taxType,
+    taxPeriod,
+    depositor,
+    bankBranch,
+    accountHead,
+    amountWords,
+    amount,
+    officerName,
+    note,
+    extraComment,
+  } = req.body || {};
+
+  if (!challanNo || !taxType || !taxPeriod) {
+    return res.status(400).json({ error: "challanNo, taxType and taxPeriod are required" });
+  }
+
+  if (!bankBranch || !accountHead || amount == null || amount === "") {
+    return res.status(400).json({ error: "bankBranch, accountHead and amount are required" });
+  }
+
+  const out = db
+    .prepare(`
+      INSERT INTO tax_return_challans (
+        challan_no,
+        date_day,
+        date_month,
+        date_year,
+        zone,
+        circle,
+        tax_type,
+        tax_period,
+        depositor_name,
+        depositor_tin,
+        depositor_address,
+        bank_branch,
+        account_head,
+        amount_words,
+        amount,
+        phone,
+        officer_name,
+        note,
+        extra_comment,
+        created_by
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `)
+    .run(
+      String(challanNo || ""),
+      String(date?.day || ""),
+      String(date?.month || ""),
+      String(date?.year || ""),
+      String(zone || ""),
+      String(circle || ""),
+      String(taxType || ""),
+      String(taxPeriod || ""),
+      String(depositor?.name || ""),
+      String(depositor?.tin || ""),
+      String(depositor?.address || ""),
+      String(bankBranch || ""),
+      String(accountHead || ""),
+      String(amountWords || ""),
+      Number(amount),
+      String(depositor?.phone || ""),
+      String(officerName || ""),
+      String(note || ""),
+      String(extraComment || ""),
+      req.user.id
+    );
+
+  logAction(req.user.id, "tax_return_challans", "ADD", out.lastInsertRowid);
+
+  res.json({ ok: true, id: out.lastInsertRowid });
+});
+
+const port = process.env.PORT || 4000;
+app.listen(port, () => {
+  console.log(`🚀 API running at http://localhost:${port}`);
+});
