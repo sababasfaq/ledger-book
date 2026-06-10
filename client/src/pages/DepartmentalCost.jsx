@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../state/AuthContext.jsx";
 
 export default function DepartmentalCost() {
   useAuth();
-  const navigate = useNavigate();
 
   const [rows, setRows] = useState([]);
   const [include, setInclude] = useState({

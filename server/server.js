@@ -13,7 +13,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 const tableFor = (t) =>
   t === "general"
@@ -544,6 +544,174 @@ app.post("/api/tax-return-challan", authRequired, (req, res) => {
 
   logAction(req.user.id, "tax_return_challans", "ADD", out.lastInsertRowid);
 
+  res.json({ ok: true, id: out.lastInsertRowid });
+});
+
+// INSTRUCTIONS
+
+function mapSubmission(row) {
+  return {
+    id: row.id,
+    instructionId: row.instruction_id,
+    submittedBy: row.submitted_by,
+    submittedByName: row.submittedByName || "",
+    fileName: row.file_name || "",
+    fileData: row.file_data || "",
+    note: row.note || "",
+    submittedAt: row.submitted_at,
+  };
+}
+
+function pendingCountForUser(userId) {
+  const row = db
+    .prepare(`
+      SELECT COUNT(*) AS count FROM instructions i
+      WHERE NOT EXISTS (
+        SELECT 1 FROM instruction_submissions s
+        WHERE s.instruction_id = i.id AND s.submitted_by = ?
+      )
+    `)
+    .get(userId);
+  return row?.count ?? 0;
+}
+
+app.get("/api/instructions/pending-count", authRequired, (req, res) => {
+  if (req.user.role === "super_admin") {
+    return res.json({ count: 0 });
+  }
+  res.json({ count: pendingCountForUser(req.user.id) });
+});
+
+app.get("/api/instructions", authRequired, (req, res) => {
+  const isAdmin = req.user.role === "super_admin";
+  const userId = req.user.id;
+
+  const instructions = db
+    .prepare(`
+      SELECT i.id, i.title, i.description, i.created_at, i.created_by,
+             u.name AS createdByName
+      FROM instructions i
+      LEFT JOIN users u ON i.created_by = u.id
+      ORDER BY i.created_at DESC, i.id DESC
+    `)
+    .all();
+
+  const submissions = db
+    .prepare(`
+      SELECT s.*, u.name AS submittedByName
+      FROM instruction_submissions s
+      LEFT JOIN users u ON s.submitted_by = u.id
+      ORDER BY s.submitted_at DESC
+    `)
+    .all();
+
+  const mapped = instructions.map((i) => {
+    const subs = submissions
+      .filter((s) => s.instruction_id === i.id)
+      .map(mapSubmission);
+    const mine = subs.find((s) => s.submittedBy === userId);
+
+    return {
+      id: i.id,
+      title: i.title,
+      description: i.description,
+      createdAt: i.created_at,
+      createdByName: i.createdByName || "",
+      mySubmitted: !!mine,
+      mySubmission: mine || null,
+      submissions: isAdmin ? subs : [],
+    };
+  });
+
+  const pendingCount = isAdmin ? 0 : pendingCountForUser(userId);
+
+  res.json({ instructions: mapped, pendingCount });
+});
+
+app.post("/api/instructions", authRequired, superAdminOnly, (req, res) => {
+  const { title, description } = req.body || {};
+  const titleStr = String(title || "").trim();
+  const descStr = String(description || "").trim();
+
+  if (!titleStr) return res.status(400).json({ error: "title is required" });
+  if (!descStr) return res.status(400).json({ error: "description is required" });
+
+  const out = db
+    .prepare(
+      `INSERT INTO instructions (title, description, created_by) VALUES (?,?,?)`
+    )
+    .run(titleStr, descStr, req.user.id);
+
+  logAction(req.user.id, "instructions", "ADD", out.lastInsertRowid);
+  res.json({ ok: true, id: out.lastInsertRowid });
+});
+
+app.delete("/api/instructions/:id", authRequired, superAdminOnly, (req, res) => {
+  const id = Number(req.params.id);
+  db.prepare(`DELETE FROM instructions WHERE id=?`).run(id);
+  logAction(req.user.id, "instructions", "DELETE", id);
+  res.json({ ok: true });
+});
+
+app.get("/api/instructions/:id/submissions", authRequired, superAdminOnly, (req, res) => {
+  const rows = db
+    .prepare(`
+      SELECT s.*, u.name AS submittedByName
+      FROM instruction_submissions s
+      LEFT JOIN users u ON s.submitted_by = u.id
+      WHERE s.instruction_id = ?
+      ORDER BY s.submitted_at DESC
+    `)
+    .all(Number(req.params.id));
+
+  res.json(rows.map(mapSubmission));
+});
+
+app.post("/api/instructions/:id/submit", authRequired, (req, res) => {
+  if (req.user.role === "super_admin") {
+    return res.status(403).json({ error: "Chairman cannot submit instructions" });
+  }
+
+  const instructionId = Number(req.params.id);
+  const instruction = db
+    .prepare(`SELECT id FROM instructions WHERE id=?`)
+    .get(instructionId);
+
+  if (!instruction) {
+    return res.status(404).json({ error: "Instruction not found" });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id FROM instruction_submissions WHERE instruction_id=? AND submitted_by=?`
+    )
+    .get(instructionId, req.user.id);
+
+  if (existing) {
+    return res.status(409).json({ error: "Already marked as done" });
+  }
+
+  const { note, fileName, fileData } = req.body || {};
+  const dataStr = String(fileData || "").trim();
+
+  if (dataStr && dataStr.length > 8 * 1024 * 1024) {
+    return res.status(400).json({ error: "File is too large (max ~6MB)" });
+  }
+
+  const out = db
+    .prepare(`
+      INSERT INTO instruction_submissions (instruction_id, submitted_by, note, file_name, file_data)
+      VALUES (?,?,?,?,?)
+    `)
+    .run(
+      instructionId,
+      req.user.id,
+      String(note || "").trim(),
+      fileName ? String(fileName).trim() : null,
+      dataStr || null
+    );
+
+  logAction(req.user.id, "instruction_submissions", "ADD", out.lastInsertRowid);
   res.json({ ok: true, id: out.lastInsertRowid });
 });
 

@@ -116,6 +116,25 @@ create table if not exists tax_return_challans (
   created_by integer references users(id),
   created_at text not null default (datetime('now','localtime'))
 );
+
+create table if not exists instructions (
+  id integer primary key autoincrement,
+  title text not null,
+  description text not null,
+  created_by integer references users(id),
+  created_at text not null default (datetime('now','localtime'))
+);
+
+create table if not exists instruction_submissions (
+  id integer primary key autoincrement,
+  instruction_id integer not null references instructions(id) on delete cascade,
+  submitted_by integer references users(id),
+  file_name text,
+  file_data text,
+  note text,
+  submitted_at text not null default (datetime('now','localtime')),
+  unique(instruction_id, submitted_by)
+);
 `);
 
 try {
@@ -206,6 +225,15 @@ try {
   }
 } catch (e) {
   console.error("tax_return_challans schema migration failed:", e);
+}
+
+try {
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_instruction_submissions_user
+     ON instruction_submissions(instruction_id, submitted_by)`
+  );
+} catch (e) {
+  console.error("instruction_submissions unique index failed:", e);
 }
 
 export { db };

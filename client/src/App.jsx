@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { NavLink, Routes, Route, Navigate } from "react-router-dom";
+import { api } from "./api";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Login from "./pages/Login.jsx";
 import GeneralLedger from "./pages/GeneralLedger.jsx";
@@ -13,12 +15,36 @@ import LogBook from "./pages/LogBook.jsx";
 import TaxPage from "./pages/TaxPage.jsx";
 import Profile from "./pages/Profile.jsx";
 import TaxReturnChallanPage from "./pages/TaxReturnChallanPage.jsx";
-
+import InstructionsPage from "./pages/InstructionsPage.jsx";
 import logoImg from "./assets/logo.png";
 import uniBg from "./assets/uni.png";
 
 export default function App() {
   const { user, logout } = useAuth();
+  const [instructionBadge, setInstructionBadge] = useState(0);
+
+  const refreshInstructionBadge = async () => {
+    if (!user || user.role === "super_admin") {
+      setInstructionBadge(0);
+      return;
+    }
+    try {
+      const { count } = await api.getInstructionsPendingCount();
+      setInstructionBadge(count ?? 0);
+    } catch {
+      setInstructionBadge(0);
+    }
+  };
+
+  useEffect(() => {
+    refreshInstructionBadge();
+  }, [user]);
+
+  useEffect(() => {
+    const onUpdate = () => refreshInstructionBadge();
+    window.addEventListener("instructions-updated", onUpdate);
+    return () => window.removeEventListener("instructions-updated", onUpdate);
+  }, [user]);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -43,6 +69,15 @@ export default function App() {
 
             {user ? (
               <div className="flex items-center gap-3">
+                {user.role === "official" && instructionBadge > 0 && (
+                  <NavLink
+                    to="/instructions"
+                    className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-50 border border-red-200 text-red-700 text-sm hover:bg-red-100"
+                  >
+                    <span className="font-medium">{instructionBadge}</span>
+                    <span>instruction{instructionBadge !== 1 ? "s" : ""} to do</span>
+                  </NavLink>
+                )}
                 <img
                   src={user.pictureUrl || logoImg}
                   alt="Profile"
@@ -83,6 +118,11 @@ export default function App() {
                 <Tab to="/department-ledger" label="Department Ledger" />
                 <Tab to="/departmental-cost" label="Departmental Cost" />
                 <Tab to="/tax-return-challan" label="Tax Return Challan" />
+                <Tab
+                  to="/instructions"
+                  label="Instructions"
+                  badge={instructionBadge}
+                />
                 {user.role === "super_admin" && (
                   <>
                     <Tab to="/tax" label="Tax" />
@@ -182,6 +222,14 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/instructions"
+              element={
+                <ProtectedRoute>
+                  <InstructionsPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
@@ -190,17 +238,25 @@ export default function App() {
   );
 }
 
-function Tab({ to, label }) {
+function Tab({ to, label, badge = 0 }) {
   return (
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `w-44 text-center px-3 py-1 rounded-md text-sm ${
+        `relative w-44 text-center px-3 py-1 rounded-md text-sm ${
           isActive ? "bg-slate-900 text-white" : "hover:bg-white"
         }`
       }
     >
       {label}
+      {badge > 0 && (
+        <span
+          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none"
+          aria-label={`${badge} pending instructions`}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
     </NavLink>
   );
 }

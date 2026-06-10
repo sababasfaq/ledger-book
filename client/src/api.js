@@ -104,4 +104,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  getInstructionsPendingCount: () => req(`/api/instructions/pending-count`),
+  getInstructions: () => req(`/api/instructions`),
+  addInstruction: (payload) =>
+    req(`/api/instructions`, { method: "POST", body: JSON.stringify(payload) }),
+  deleteInstruction: (id) =>
+    req(`/api/instructions/${id}`, { method: "DELETE" }),
+  getSubmissions: (id) => req(`/api/instructions/${id}/submissions`),
+  submitInstruction: (id, payload) =>
+    req(`/api/instructions/${id}/submit`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
