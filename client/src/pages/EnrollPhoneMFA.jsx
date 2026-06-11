@@ -41,36 +41,57 @@ export default function EnrollPhoneMFA() {
       const assertion = PhoneMultiFactorGenerator.assertion(cred);
       await multiFactor(auth.currentUser).enroll(assertion, "Office phone");
       setMsg("2-step enabled!");
-      nav("/general-ledger", { replace: true });
+      nav("/dashboard", { replace: true });
     } catch (e) {
       setMsg(e.message);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto p-6 bg-white border rounded">
-      <h2 className="font-semibold mb-3">Enable SMS 2-Step</h2>
-      <input className="border w-full p-2 mb-2"
-             placeholder="+15555550100"
-             value={phone}
-             onChange={e=>setPhone(e.target.value)} />
-      <button className="bg-slate-900 text-white px-3 py-2 rounded" onClick={sendCode}>
-        Send Code
-      </button>
+    <article className="max-w-md mx-auto p-6 bg-white border rounded" aria-labelledby="mfa-title">
+      <header>
+        <h1 id="mfa-title" className="text-lg font-semibold mb-3">Enable SMS 2-Step</h1>
+      </header>
+
+      <section aria-label="Step 1: Phone Number" className="mb-4">
+        <label htmlFor="mfa-phone" className="sr-only">Phone Number</label>
+        <input 
+          id="mfa-phone"
+          className="border w-full p-2 mb-2 rounded"
+          placeholder="+15555550100"
+          value={phone}
+          onChange={e=>setPhone(e.target.value)} 
+        />
+        <button 
+          className="bg-slate-900 text-white px-3 py-2 rounded w-full" 
+          onClick={sendCode}
+          aria-label="Send verification code to phone"
+        >
+          Send Code
+        </button>
+      </section>
 
       {verificationId && (
-        <>
-          <input className="border w-full p-2 mt-3 mb-2"
-                 placeholder="Enter SMS code"
-                 value={code}
-                 onChange={e=>setCode(e.target.value)} />
-          <button className="bg-slate-900 text-white px-3 py-2 rounded" onClick={confirm}>
+        <section aria-label="Step 2: Verification Code" className="border-t pt-4">
+          <label htmlFor="mfa-code" className="sr-only">Enter SMS code</label>
+          <input 
+            id="mfa-code"
+            className="border w-full p-2 mb-2 rounded"
+            placeholder="Enter SMS code"
+            value={code}
+            onChange={e=>setCode(e.target.value)} 
+          />
+          <button 
+            className="bg-slate-900 text-white px-3 py-2 rounded w-full" 
+            onClick={confirm}
+            aria-label="Verify code and enable MFA"
+          >
             Verify & Enable
           </button>
-        </>
+        </section>
       )}
 
-      {msg && <p className="text-sm mt-3">{msg}</p>}
-    </div>
+      {msg && <p className="text-sm mt-3" role="alert">{msg}</p>}
+    </article>
   );
 }

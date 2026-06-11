@@ -119,58 +119,67 @@ export default function InstructionsPage() {
   const completed = instructions.filter((i) => i.mySubmitted);
 
   return (
-    <div>
-      {isChairman ? (
-        <h1 className="text-xl font-semibold mb-1">Manage Instructions</h1>
-      ) : (
-        <h1 className="text-xl font-semibold mb-1">Office Instructions</h1>
-      )}
-      <p className="text-sm text-slate-500 mb-4">
-        {isChairman
-          ? "Add tasks for office workers. They will see them on this page with a notification badge."
-          : "Complete the instructions from the Chairman. Attach a file only if required."}
-      </p>
+    <article aria-labelledby="instructions-title">
+      <header className="mb-4">
+        {isChairman ? (
+          <h1 id="instructions-title" className="text-xl font-semibold mb-1">Manage Instructions</h1>
+        ) : (
+          <h1 id="instructions-title" className="text-xl font-semibold mb-1">Office Instructions</h1>
+        )}
+        <p className="text-sm text-slate-500">
+          {isChairman
+            ? "Add tasks for office workers. They will see them on this page with a notification badge."
+            : "Complete the instructions from the Chairman. Attach a file only if required."}
+        </p>
+      </header>
 
       {msg && (
-        <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+        <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2" role="alert">
           {msg}
         </div>
       )}
 
       {isChairman && (
-        <div className="bg-white border rounded p-4 mb-6 space-y-3">
-          <h2 className="font-medium text-slate-800">Add New Instruction</h2>
-          <input
-            className="border rounded px-3 py-2 w-full"
-            placeholder="Title"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-          />
-          <textarea
-            className="border rounded px-3 py-2 w-full min-h-[100px]"
-            placeholder="What should the office worker do?"
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-          />
+        <section aria-labelledby="add-instruction-title" className="bg-white border rounded p-4 mb-6 space-y-3">
+          <h2 id="add-instruction-title" className="font-medium text-slate-800">Add New Instruction</h2>
+          <div className="space-y-2">
+            <label htmlFor="inst-title" className="sr-only">Title</label>
+            <input
+              id="inst-title"
+              className="border rounded px-3 py-2 w-full"
+              placeholder="Title"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+            <label htmlFor="inst-desc" className="sr-only">Description</label>
+            <textarea
+              id="inst-desc"
+              className="border rounded px-3 py-2 w-full min-h-[100px]"
+              placeholder="What should the office worker do?"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </div>
           <button
             type="button"
             className="px-4 py-2 rounded bg-emerald-600 text-white text-sm"
             onClick={onAdd}
+            aria-label="Add new instruction"
           >
             Add Instruction
           </button>
-        </div>
+        </section>
       )}
 
       {loading ? (
-        <p className="text-slate-500 text-sm">Loading...</p>
+        <p className="text-slate-500 text-sm" role="status">Loading...</p>
       ) : isOfficer ? (
-        <>
+        <div className="space-y-8">
           {pending.length > 0 && (
-            <section className="mb-8">
-              <h2 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
+            <section aria-labelledby="todo-title">
+              <h2 id="todo-title" className="font-medium text-slate-800 mb-3 flex items-center gap-2">
                 To Do
-                <span className="text-xs px-2 py-0.5 rounded-full bg-red-500 text-white">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-red-500 text-white" aria-label={`${pending.length} items to do`}>
                   {pending.length}
                 </span>
               </h2>
@@ -200,8 +209,8 @@ export default function InstructionsPage() {
           )}
 
           {completed.length > 0 && (
-            <section className="mb-8">
-              <h2 className="font-medium text-slate-800 mb-3">Completed</h2>
+            <section aria-labelledby="completed-title">
+              <h2 id="completed-title" className="font-medium text-slate-800 mb-3">Completed</h2>
               <div className="space-y-4">
                 {completed.map((inst) => (
                   <OfficerCard key={inst.id} inst={inst} done />
@@ -213,10 +222,10 @@ export default function InstructionsPage() {
           {pending.length === 0 && completed.length === 0 && (
             <p className="text-slate-500 text-sm">No instructions at the moment.</p>
           )}
-        </>
+        </div>
       ) : isChairman ? (
-        <section>
-          <h2 className="font-medium text-slate-800 mb-3">All Instructions</h2>
+        <section aria-labelledby="all-instructions-title">
+          <h2 id="all-instructions-title" className="font-medium text-slate-800 mb-3">All Instructions</h2>
           {instructions.length === 0 ? (
             <p className="text-slate-500 text-sm">No instructions yet.</p>
           ) : (
@@ -232,7 +241,7 @@ export default function InstructionsPage() {
           )}
         </section>
       ) : null}
-    </div>
+    </article>
   );
 }
 
@@ -256,6 +265,7 @@ function ChairmanCard({ inst, onDelete }) {
           type="button"
           className="text-sm text-red-600 hover:underline shrink-0"
           onClick={onDelete}
+          aria-label={`Delete instruction: ${inst.title}`}
         >
           Delete
         </button>
@@ -266,7 +276,7 @@ function ChairmanCard({ inst, onDelete }) {
       </div>
 
       {doneCount > 0 && (
-        <ul className="mt-3 space-y-2 border-t pt-3">
+        <ul role="list" className="mt-3 space-y-2 border-t pt-3">
           {inst.submissions.map((s) => (
             <li
               key={s.id}
@@ -283,6 +293,7 @@ function ChairmanCard({ inst, onDelete }) {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-600 hover:underline text-xs shrink-0"
+                  aria-label={`Download file ${s.fileName} submitted by ${s.submittedByName}`}
                 >
                   {s.fileName || "View file"}
                 </a>
@@ -331,6 +342,7 @@ function OfficerCard({
           type="button"
           className="mt-4 px-4 py-2 rounded bg-slate-900 text-white text-sm"
           onClick={onStart}
+          aria-label={`Mark instruction ${inst.title} as done`}
         >
           Mark as Done
         </button>
@@ -346,6 +358,7 @@ function OfficerCard({
             className="text-sm"
             onChange={onFileChange}
             accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            aria-label="Attach file"
           />
           {selectedFile && (
             <p className="text-xs text-slate-500">Selected: {selectedFile.name}</p>
@@ -356,6 +369,7 @@ function OfficerCard({
               className="px-4 py-2 rounded bg-emerald-600 text-white text-sm disabled:opacity-50"
               disabled={submitting}
               onClick={onSubmit}
+              aria-label={`Submit completion for ${inst.title}`}
             >
               {submitting ? "Submitting..." : "Submit & Mark Done"}
             </button>
@@ -364,6 +378,7 @@ function OfficerCard({
               className="px-4 py-2 rounded border text-sm"
               disabled={submitting}
               onClick={onCancel}
+              aria-label="Cancel submission"
             >
               Cancel
             </button>
@@ -380,6 +395,7 @@ function OfficerCard({
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-600 hover:underline"
+              aria-label={`Download your submitted file ${submission.fileName}`}
             >
               Your file: {submission.fileName || "attachment"}
             </a>

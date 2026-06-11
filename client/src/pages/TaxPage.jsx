@@ -77,43 +77,55 @@ export default function TaxPage() {
   };
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold mb-4">Tax</h1>
+    <article aria-labelledby="tax-title">
+      <header>
+        <h1 id="tax-title" className="text-xl font-semibold mb-4">Tax</h1>
+      </header>
 
       {isAdmin && (
-        <div className="bg-white border rounded p-4 mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input
-            className="border rounded px-2 py-1"
-            placeholder="Tax Type"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-          <input
-            type="number"
-            step="0.01"
-            className="border rounded px-2 py-1"
-            placeholder="Percentage"
-            value={form.percentage}
-            onChange={(e) => setForm({ ...form, percentage: e.target.value })}
-          />
+        <section aria-labelledby="add-tax-title" className="bg-white border rounded p-4 mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <h2 id="add-tax-title" className="sr-only">Add New Tax Type</h2>
+          <div className="space-y-1">
+            <label htmlFor="tax-name" className="sr-only">Tax Type Name</label>
+            <input
+              id="tax-name"
+              className="border rounded px-2 py-1 w-full"
+              placeholder="Tax Type"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="tax-percentage" className="sr-only">Percentage</label>
+            <input
+              id="tax-percentage"
+              type="number"
+              step="0.01"
+              className="border rounded px-2 py-1 w-full"
+              placeholder="Percentage"
+              value={form.percentage}
+              onChange={(e) => setForm({ ...form, percentage: e.target.value })}
+            />
+          </div>
           <button
             className="px-3 py-1 rounded bg-emerald-600 text-white"
             onClick={onAdd}
+            aria-label="Add new tax type"
           >
             Add Tax
           </button>
-        </div>
+        </section>
       )}
 
-      {msg && <p className="text-sm text-red-600 mb-3">{msg}</p>}
+      {msg && <p className="text-sm text-red-600 mb-3" role="alert">{msg}</p>}
 
-      <div className="overflow-x-auto bg-white border rounded">
+      <section aria-label="Tax types table" className="overflow-x-auto bg-white border rounded">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-100">
             <tr>
-              <th className="text-left px-3 py-2">Tax Type</th>
-              <th className="text-left px-3 py-2">Percentage</th>
-              {isAdmin && <th className="text-left px-3 py-2">Actions</th>}
+              <th scope="col" className="text-left px-3 py-2">Tax Type</th>
+              <th scope="col" className="text-left px-3 py-2">Percentage</th>
+              {isAdmin && <th scope="col" className="text-left px-3 py-2">Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -123,6 +135,7 @@ export default function TaxPage() {
                   <>
                     <td className="px-3 py-2">
                       <input
+                        aria-label="Edit tax type name"
                         className="border rounded px-2 py-1 w-full"
                         value={editForm.name}
                         onChange={(e) =>
@@ -132,6 +145,7 @@ export default function TaxPage() {
                     </td>
                     <td className="px-3 py-2">
                       <input
+                        aria-label="Edit tax percentage"
                         type="number"
                         step="0.01"
                         className="border rounded px-2 py-1 w-full"
@@ -149,6 +163,7 @@ export default function TaxPage() {
                         <button
                           className="px-2 py-1 text-white bg-emerald-600 rounded mr-2"
                           onClick={onSave}
+                          aria-label={`Save changes for ${r.name}`}
                         >
                           Save
                         </button>
@@ -158,12 +173,14 @@ export default function TaxPage() {
                             setEditingId(null);
                             setEditForm(emptyForm);
                           }}
+                          aria-label="Cancel editing"
                         >
                           Cancel
                         </button>
                         <button
                           className="px-2 py-1 bg-red-600 text-white rounded"
                           onClick={() => onDelete(r.id)}
+                          aria-label={`Delete ${r.name}`}
                         >
                           Delete
                         </button>
@@ -187,12 +204,14 @@ export default function TaxPage() {
                               percentage: r.percentage,
                             });
                           }}
+                          aria-label={`Edit ${r.name}`}
                         >
                           Edit
                         </button>
                         <button
                           className="px-2 py-1 bg-red-600 text-white rounded"
                           onClick={() => onDelete(r.id)}
+                          aria-label={`Delete ${r.name}`}
                         >
                           Delete
                         </button>
@@ -215,7 +234,7 @@ export default function TaxPage() {
             )}
           </tbody>
         </table>
-      </div>
-    </div>
+      </section>
+    </article>
   );
 }

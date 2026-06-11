@@ -66,6 +66,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen relative overflow-hidden">
+      <a 
+        href="#main-content" 
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-white focus:px-4 focus:py-2 focus:rounded focus:shadow focus:text-sm focus:font-medium"
+      >
+        Skip to main content
+      </a>
+
       {user && (
         <div
           className="fixed inset-0 pointer-events-none bg-center bg-no-repeat bg-contain opacity-[0.06] z-0"
@@ -92,6 +99,9 @@ export default function App() {
                   <button 
                     onClick={() => setShowNotifications(!showNotifications)}
                     className="p-2 rounded-full hover:bg-slate-100 transition relative"
+                    aria-label="Notifications"
+                    aria-haspopup="true"
+                    aria-expanded={showNotifications}
                   >
                     <Bell size={22} className="text-slate-600" />
                     {badgeCount > 0 && (
@@ -102,7 +112,12 @@ export default function App() {
                   </button>
 
                   {showNotifications && (
-                    <div className="absolute right-0 mt-2 w-72 bg-white border rounded-lg shadow-xl z-50 overflow-hidden">
+                    <div 
+                      role="dialog" 
+                      aria-modal="true" 
+                      aria-label="Notifications panel"
+                      className="absolute right-0 mt-2 w-72 bg-white border rounded-lg shadow-xl z-50 overflow-hidden"
+                    >
                       <div className="p-3 border-b bg-slate-50 font-semibold text-sm">Notifications</div>
                       <div className="max-h-80 overflow-y-auto">
                         {user.role === "super_admin" && pendingApprovals > 0 && (
@@ -133,7 +148,7 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-3 border-l pl-4">
+                <div className="flex items-center gap-5 border-l pl-4">
                   <img
                     src={user.pictureUrl || logoImg}
                     alt="Profile"
@@ -158,6 +173,7 @@ export default function App() {
                   <button
                     className="px-4 py-2 text-sm font-medium rounded bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm"
                     onClick={logout}
+                    aria-label="Log out of Ledger Book"
                   >
                     Logout
                   </button>
@@ -167,33 +183,35 @@ export default function App() {
           </div>
 
           {user && (
-            <nav className="bg-slate-100/70 border-t">
-              <div className="max-w-7xl mx-auto px-4 py-2 flex gap-2 flex-wrap">
-                <Tab to="/dashboard" label="Dashboard" />
-                <Tab to="/general-ledger" label="General Ledger" />
-                <Tab to="/unofficial-ledger" label="Unofficial Ledger" />
-                <Tab to="/student-association" label="Student Association" />
-                <Tab to="/department-ledger" label="Department Ledger" />
-                <Tab to="/departmental-cost" label="Departmental Cost" />
-                <Tab to="/reports" label="Reports" />
-                <Tab to="/tax-return-challan" label="Tax Return Challan" />
-                <Tab
-                  to="/instructions"
-                  label="Instructions"
-                  badge={instructionBadge}
-                />
+            <nav className="bg-slate-100/70 border-t" aria-label="Main navigation">
+              <ul role="list" className="max-w-7xl mx-auto px-4 py-2 flex gap-4 flex-wrap list-none">
+                <li><Tab to="/dashboard" label="Dashboard" /></li>
+                <li><Tab to="/general-ledger" label="General Ledger" /></li>
+                <li><Tab to="/unofficial-ledger" label="Unofficial Ledger" /></li>
+                <li><Tab to="/student-association" label="Student Association" /></li>
+                <li><Tab to="/department-ledger" label="Department Ledger" /></li>
+                <li><Tab to="/departmental-cost" label="Departmental Cost" /></li>
+                <li><Tab to="/reports" label="Reports" /></li>
+                <li><Tab to="/tax-return-challan" label="Tax Return Challan" /></li>
+                <li>
+                  <Tab
+                    to="/instructions"
+                    label="Instructions"
+                    badge={instructionBadge}
+                  />
+                </li>
                 {user.role === "super_admin" && (
                   <>
-                    <Tab to="/tax" label="Tax" />
-                    <Tab to="/log-book" label="Log Book" />
+                    <li><Tab to="/tax" label="Tax" /></li>
+                    <li><Tab to="/log-book" label="Log Book" /></li>
                   </>
                 )}
-              </div>
+              </ul>
             </nav>
           )}
         </header>
 
-        <main className="max-w-7xl mx-auto px-4 py-6">
+        <main id="main-content" aria-label="Page content" className="max-w-7xl mx-auto px-4 py-6">
           <Routes>
             <Route
               path="/"
@@ -318,15 +336,17 @@ function Tab({ to, label, badge = 0 }) {
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `relative w-44 text-center px-3 py-1 rounded-md text-sm ${
-          isActive ? "bg-slate-900 text-white" : "hover:bg-white"
+        `relative w-64 h-14 flex items-center justify-center px-4 rounded-xl text-[14px] font-bold uppercase tracking-wider transition-all duration-200 shrink-0 ${
+          isActive 
+            ? "bg-slate-900 text-white shadow-xl shadow-slate-200 scale-105 z-10" 
+            : "text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-md"
         }`
       }
     >
-      {label}
+      <span className="truncate">{label}</span>
       {badge > 0 && (
         <span
-          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none"
+          className="absolute -top-2 -right-1 min-w-[24px] h-[24px] px-1 flex items-center justify-center rounded-full bg-red-600 text-white text-[11px] font-black border-2 border-white shadow-md"
           aria-label={`${badge} pending instructions`}
         >
           {badge > 99 ? "99+" : badge}

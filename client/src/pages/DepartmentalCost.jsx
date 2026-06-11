@@ -1,8 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../state/AuthContext.jsx";
+import { useNavigate } from "react-router-dom";
+import { 
+  Search, 
+  Calendar, 
+  X, 
+  Printer, 
+  FileText, 
+  CheckSquare, 
+  Square,
+  ArrowUpDown
+} from "lucide-react";
 
 export default function DepartmentalCost() {
+  const navigate = useNavigate();
   useAuth();
 
   const [rows, setRows] = useState([]);
@@ -13,10 +25,10 @@ export default function DepartmentalCost() {
     departmental: true,
   });
 
-  const [range, setRange] = useState("all");
-  const [year, setYear] = useState("");
-  const [month, setMonth] = useState("");
-  const [filterDate, setFilterDate] = useState("");
+  // Filters
+  const [searchTerm, setSearchTerm] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -39,56 +51,78 @@ export default function DepartmentalCost() {
     include.departmental,
   ]);
 
-  const filtered = useMemo(
-    () => filterRows(rows, range, year, month, filterDate),
-    [rows, range, year, month, filterDate]
-  );
+  const filtered = useMemo(() => {
+    let res = [...rows];
+    
+    if (searchTerm) {
+      const s = searchTerm.toLowerCase();
+      res = res.filter(r => 
+        (r.description || "").toLowerCase().includes(s) ||
+        (r.voucherNo || r.voucher_no || "").toLowerCase().includes(s) ||
+        (r.signature || "").toLowerCase().includes(s)
+      );
+    }
 
-  const withBalance = useMemo(() => {
+    if (fromDate) {
+      res = res.filter(r => r.date >= fromDate);
+    }
+    if (toDate) {
+      res = res.filter(r => r.date <= toDate);
+    }
+
+    return res;
+  }, [rows, searchTerm, fromDate, toDate]);
+
+  // Calculate balance from OLDEST to NEWEST, then reverse for display
+  const displayRows = useMemo(() => {
+    // 1. Ensure sorted by date ASC for balance calculation
+    const sortedAsc = [...filtered].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (a.id || 0) - (b.id || 0);
+    });
+
     let bal = 0;
-    return filtered.map((r) => {
+    const withBal = sortedAsc.map((r) => {
       const dep = num(r.deposit);
       const cost = num(r.cost);
       bal += dep - cost;
       return { ...r, netBalance: bal };
     });
-  }, [filtered]);
 
-  useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil(withBalance.length / pageSize));
-    if (page > totalPages) setPage(1);
-  }, [withBalance.length, pageSize, page]);
+    // 2. Reverse for "latest to old" display
+    return withBal.reverse();
+  }, [filtered]);
 
   const pageRows = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return withBalance.slice(start, start + pageSize);
-  }, [withBalance, page, pageSize]);
+    return displayRows.slice(start, start + pageSize);
+  }, [displayRows, page, pageSize]);
 
-  const totalPages = Math.max(1, Math.ceil(withBalance.length / pageSize));
-  const startIndex = withBalance.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const endIndex =
-    withBalance.length === 0
-      ? 0
-      : Math.min(page * pageSize, withBalance.length);
+  const totalPages = Math.max(1, Math.ceil(displayRows.length / pageSize));
+  const startIndex = displayRows.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endIndex = displayRows.length === 0 ? 0 : Math.min(page * pageSize, displayRows.length);
 
   const handlePrint = () => {
     if (!tableRef.current) return;
-
     const printContents = tableRef.current.outerHTML;
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`
       <html>
         <head>
-          <title></title>
+          <title>Departmental Cost Report</title>
           <style>
-            table { width: 100%; border-collapse: collapse; }
-            th, td { border: 1px solid #ddd; padding: 4px; font-size: 12px; text-align: left; }
-            thead { background: #f1f5f9; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; text-align: left; }
+            thead { background: #f8fafc; }
             .no-print { display: none !important; }
           </style>
         </head>
-        <body>${printContents}</body>
+        <body>
+          <h2 style="text-align: center;">Departmental Cost (Combined)</h2>
+          <p>Generated on: ${new Date().toLocaleDateString()}</p>
+          ${printContents}
+        </body>
       </html>
     `);
     w.document.close();
@@ -113,7 +147,6 @@ export default function DepartmentalCost() {
 
   const toggleSelectAllCurrentPage = () => {
     const allSelected = pageRows.every((r) => isSelected(r));
-
     if (allSelected) {
       setSelectedRows((prev) =>
         prev.filter(
@@ -136,289 +169,227 @@ export default function DepartmentalCost() {
       alert("Please select at least one row for Tax Return.");
       return;
     }
-
     navigate("/tax-return-challan", {
-      state: {
-        selectedRows,
-      },
+      state: { selectedRows },
     });
   };
 
+  const clearFilters = () => {
+    setSearchTerm("");
+    setFromDate("");
+    setToDate("");
+  };
+
   return (
-    <div>
-      <h1 className="text-xl font-semibold mb-4">Departmental Cost (Combined)</h1>
+    <article aria-labelledby="dept-cost-title" className="space-y-6">
+      <header className="flex items-center justify-between">
+        <h1 id="dept-cost-title" className="text-2xl font-bold">Departmental Cost (Combined)</h1>
+        <div className="flex gap-2">
+          <button
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition shadow-sm font-semibold"
+            onClick={goToTaxReturn}
+            aria-label={`Go to Tax Return for ${selectedRows.length} selected rows`}
+          >
+            <FileText size={18} aria-hidden="true" />
+            Tax Return ({selectedRows.length})
+          </button>
+          <button
+            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition shadow-sm font-semibold"
+            onClick={handlePrint}
+            aria-label="Print ledger"
+          >
+            <Printer size={18} aria-hidden="true" />
+            Print
+          </button>
+        </div>
+      </header>
 
-      <div className="flex flex-wrap items-center gap-3 mb-3">
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={include.general}
-            onChange={(e) =>
-              setInclude((s) => ({ ...s, general: e.target.checked }))
-            }
-          />
-          General
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={include.unofficial}
-            onChange={(e) =>
-              setInclude((s) => ({ ...s, unofficial: e.target.checked }))
-            }
-          />
-          Unofficial
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={include.association}
-            onChange={(e) =>
-              setInclude((s) => ({ ...s, association: e.target.checked }))
-            }
-          />
-          Student Association
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={include.departmental}
-            onChange={(e) =>
-              setInclude((s) => ({ ...s, departmental: e.target.checked }))
-            }
-          />
-          Department Ledger
-        </label>
-      </div>
+      {/* Ledgers Selection */}
+      <section aria-label="Ledger selection" className="bg-white p-4 rounded-xl border shadow-sm space-y-4">
+        <div className="flex items-center gap-2 text-slate-500 mb-2">
+          <CheckSquare size={18} aria-hidden="true" />
+          <span className="text-xs font-bold uppercase tracking-wider">Include Ledgers</span>
+        </div>
+        <div className="flex flex-wrap gap-6">
+          <Checkbox label="General" checked={include.general} onChange={v => setInclude(s => ({...s, general: v}))} />
+          <Checkbox label="Unofficial" checked={include.unofficial} onChange={v => setInclude(s => ({...s, unofficial: v}))} />
+          <Checkbox label="Student Association" checked={include.association} onChange={v => setInclude(s => ({...s, association: v}))} />
+          <Checkbox label="Department Ledger" checked={include.departmental} onChange={v => setInclude(s => ({...s, departmental: v}))} />
+        </div>
+      </section>
 
-      <Filters
-        range={range}
-        setRange={setRange}
-        year={year}
-        setYear={setYear}
-        month={month}
-        setMonth={setMonth}
-        filterDate={filterDate}
-        setFilterDate={setFilterDate}
-        onPrint={handlePrint}
-        onTaxReturn={goToTaxReturn}
-        selectedCount={selectedRows.length}
-      />
+      {/* Filter Bar */}
+      <section aria-label="Filters" className="bg-slate-50 p-4 rounded-xl border shadow-sm">
+        <div className="flex flex-wrap gap-4 items-end">
+          <div className="flex-1 min-w-[250px] space-y-1.5">
+            <label htmlFor="dept-cost-search" className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">Search</label>
+            <div className="relative">
+              <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <input 
+                id="dept-cost-search"
+                type="text"
+                placeholder="Description, voucher, signature..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:ring-4 focus:ring-slate-100 outline-none transition"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="dept-cost-from" className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">From Date</label>
+            <input 
+              id="dept-cost-from"
+              type="date"
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+              className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:ring-4 focus:ring-slate-100 outline-none transition"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="dept-cost-to" className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">To Date</label>
+            <input 
+              id="dept-cost-to"
+              type="date"
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+              className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:ring-4 focus:ring-slate-100 outline-none transition"
+            />
+          </div>
+          <button 
+            onClick={clearFilters}
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition"
+            aria-label="Clear all filters"
+          >
+            <X size={18} aria-hidden="true" />
+            Clear
+          </button>
+        </div>
+        <div className="mt-3 px-1 text-xs text-slate-400 font-medium italic" aria-live="polite">
+          {displayRows.length} results found • Sorted newest to oldest
+        </div>
+      </section>
 
-      <div className="overflow-x-auto bg-white border rounded">
+      <section aria-label="Combined costs table" className="overflow-x-auto bg-white border rounded-xl shadow-sm overflow-hidden">
         <table ref={tableRef} className="min-w-full text-sm">
-          <thead className="bg-slate-100">
+          <thead className="bg-slate-50 border-b">
             <tr>
-              <Th className="no-print">
+              <th scope="col" className="no-print px-4 py-4">
                 <input
                   type="checkbox"
+                  aria-label="Select all rows on current page"
+                  className="rounded border-slate-300 text-slate-900 focus:ring-slate-500"
                   checked={pageRows.length > 0 && pageRows.every((r) => isSelected(r))}
                   onChange={toggleSelectAllCurrentPage}
                 />
-              </Th>
-              <Th>No</Th>
-              <Th>Date</Th>
-              <Th>Voucher No</Th>
-              <Th>Deposit</Th>
-              <Th>Cost</Th>
-              <Th>Tax</Th>
-              <Th>Description</Th>
-              <Th>Signature</Th>
-              <Th>NetBalance</Th>
+              </th>
+              <Th scope="col">No</Th>
+              <Th scope="col">Date</Th>
+              <Th scope="col">Voucher No</Th>
+              <Th scope="col">Deposit</Th>
+              <Th scope="col">Cost</Th>
+              <Th scope="col">Tax</Th>
+              <Th scope="col">Description</Th>
+              <Th scope="col">Signature</Th>
+              <Th scope="col">Balance</Th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y">
             {pageRows.map((r) => (
-              <tr key={`${r._src}-${r.id}`} className="border-t">
-                <Td className="no-print">
+              <tr key={`${r._src}-${r.id}`} className="hover:bg-slate-50 transition duration-150">
+                <td className="no-print px-4 py-4">
                   <input
                     type="checkbox"
+                    aria-label={`Select row ${r.combinedNo}`}
+                    className="rounded border-slate-300 text-slate-900 focus:ring-slate-500"
                     checked={isSelected(r)}
                     onChange={() => toggleRow(r)}
                   />
-                </Td>
-                <Td>{r.combinedNo}</Td>
-                <Td>{r.date}</Td>
+                </td>
+                <Td className="font-medium text-slate-400">{r.combinedNo}</Td>
+                <Td className="whitespace-nowrap font-semibold">{r.date}</Td>
                 <Td>{r.voucherNo ?? r.voucher_no ?? ""}</Td>
-                <Td>{fmt(r.deposit)}</Td>
-                <Td>{fmt(r.cost)}</Td>
-                <Td>{r.taxTypeName ?? ""}</Td>
-                <Td>{r.description ?? ""}</Td>
-                <Td>{r.signature ?? ""}</Td>
-                <Td
-                  className={
-                    num(r.netBalance) >= 0 ? "text-green-700" : "text-red-700"
-                  }
-                >
+                <Td className="text-green-600 font-bold">{fmt(r.deposit)}</Td>
+                <Td className="text-red-600 font-bold">{fmt(r.cost)}</Td>
+                <Td><span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-slate-100 rounded-full">{r.taxTypeName ?? ""}</span></Td>
+                <Td className="max-w-xs truncate">{r.description ?? ""}</Td>
+                <Td className="italic text-slate-500">{r.signature ?? ""}</Td>
+                <td className={`px-4 py-4 border-slate-100 font-bold ${num(r.netBalance) >= 0 ? "text-slate-900" : "text-red-700"}`}>
                   {fmt(r.netBalance)}
-                </Td>
+                </td>
               </tr>
             ))}
+            {pageRows.length === 0 && (
+              <tr>
+                <td colSpan="10" className="p-12 text-center text-slate-400">
+                  <FileText size={48} className="mx-auto mb-4 opacity-10" aria-hidden="true" />
+                  No entries found matching filters.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
 
-        <div className="flex items-center justify-between px-3 py-2 text-sm">
-          <div>
-            Showing {startIndex}-{endIndex} of {withBalance.length}
+        {/* Pagination */}
+        <nav aria-label="Table pagination" className="flex items-center justify-between px-6 py-4 bg-slate-50 border-t text-sm font-medium">
+          <div className="text-slate-500">
+            Showing {startIndex}-{endIndex} of {displayRows.length}
           </div>
-          <div className="flex items-center gap-2">
-            <span>Rows per page:</span>
-            <select
-              className="border rounded px-1 py-0.5"
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-            <button
-              className="px-2 py-1 border rounded disabled:opacity-50"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-            >
-              Previous
-            </button>
-            <span>
-              Page {page} of {totalPages}
-            </span>
-            <button
-              className="px-2 py-1 border rounded disabled:opacity-50"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-            >
-              Next
-            </button>
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <label htmlFor="dept-cost-rows" className="text-slate-400 text-xs uppercase tracking-widest font-bold">Rows:</label>
+              <select 
+                id="dept-cost-rows"
+                className="border rounded-lg px-2 py-1 bg-white outline-none focus:ring-4 focus:ring-slate-100" 
+                value={pageSize} 
+                onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+              >
+                {[10, 25, 50, 100].map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-1">
+              <button 
+                className="px-4 py-1.5 border rounded-xl bg-white hover:bg-slate-100 disabled:opacity-30 transition" 
+                onClick={() => setPage(p => Math.max(1, p - 1))} 
+                disabled={page <= 1}
+                aria-label="Previous page"
+              >
+                Prev
+              </button>
+              <div className="px-4">Page {page} of {totalPages}</div>
+              <button 
+                className="px-4 py-1.5 border rounded-xl bg-white hover:bg-slate-100 disabled:opacity-30 transition" 
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+                disabled={page >= totalPages}
+                aria-label="Next page"
+              >
+                Next
+              </button>
+            </div>
           </div>
-        </div>
-      </div>
-    </div>
+        </nav>
+      </section>
+    </article>
   );
 }
 
-function Filters({
-  range,
-  setRange,
-  year,
-  setYear,
-  month,
-  setMonth,
-  filterDate,
-  setFilterDate,
-  onPrint,
-  onTaxReturn,
-  selectedCount,
-}) {
+function Checkbox({ label, checked, onChange }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-      <div className="flex flex-wrap gap-2">
-        <select
-          className="border rounded px-2 py-1"
-          value={range}
-          onChange={(e) => setRange(e.target.value)}
-        >
-          <option value="all">All</option>
-          <option value="y">Year</option>
-          <option value="m">Month</option>
-          <option value="d">Date</option>
-          <option value="3m">Last 3 months</option>
-          <option value="6m">Last 6 months</option>
-          <option value="9m">Last 9 months</option>
-        </select>
-        {range === "y" && (
-          <input
-            className="border rounded px-2 py-1"
-            placeholder="YYYY"
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
-          />
-        )}
-        {range === "m" && (
-          <>
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="YYYY"
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-            />
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="MM"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
-          </>
-        )}
-        {range === "d" && (
-          <input
-            type="date"
-            className="border rounded px-2 py-1"
-            value={filterDate}
-            onChange={(e) => setFilterDate(e.target.value)}
-          />
-        )}
+    <label className="flex items-center gap-2.5 cursor-pointer group">
+      <div className={`transition ${checked ? 'text-slate-900' : 'text-slate-300 group-hover:text-slate-400'}`}>
+        {checked ? <CheckSquare size={20} aria-hidden="true" /> : <Square size={20} aria-hidden="true" />}
       </div>
-
-      <div className="flex gap-2 items-center">
-        <span className="text-sm text-slate-600">
-          Selected: {selectedCount}
-        </span>
-        <button
-          className="px-3 py-1 rounded bg-emerald-600 text-white"
-          onClick={onTaxReturn}
-        >
-          Tax Return
-        </button>
-        <button
-          className="px-3 py-1 rounded bg-slate-900 text-white"
-          onClick={onPrint}
-        >
-          Print
-        </button>
-      </div>
-    </div>
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <input type="checkbox" className="hidden" checked={checked} onChange={e => onChange(e.target.checked)} />
+    </label>
   );
 }
 
-const Th = ({ children, className = "" }) => (
-  <th className={`text-left px-3 py-2 ${className}`}>{children}</th>
+const Th = ({ children, className = "", ...props }) => (
+  <th className={`text-left px-4 py-4 font-bold text-slate-500 uppercase tracking-widest text-[10px] ${className}`} {...props}>{children}</th>
 );
 const Td = ({ children, className = "" }) => (
-  <td className={`px-3 py-2 ${className}`}>{children}</td>
+  <td className={`px-4 py-4 text-slate-600 border-slate-100 ${className}`}>{children}</td>
 );
 
-function num(v) {
-  return v == null ? 0 : Number(v);
-}
-function fmt(v) {
-  return v == null || v === "" ? "" : Number(v).toLocaleString();
-}
-
-function filterRows(rows, range, year, month, filterDate) {
-  if (range === "all") return rows;
-  const now = new Date();
-  if (["3m", "6m", "9m"].includes(range)) {
-    const months = Number(range.replace("m", ""));
-    const cutoff = new Date(now);
-    cutoff.setMonth(now.getMonth() - months);
-    return rows.filter((r) => new Date(r.date) >= cutoff);
-  }
-  if (range === "y") {
-    return rows.filter(
-      (r) => String(r.date).slice(0, 4) === String(year || "")
-    );
-  }
-  if (range === "m") {
-    const ym = `${year || ""}-${String(month || "").padStart(2, "0")}`;
-    return rows.filter((r) => String(r.date).slice(0, 7) === ym);
-  }
-  if (range === "d") {
-    if (!filterDate) return rows;
-    return rows.filter((r) => String(r.date) === String(filterDate));
-  }
-  return rows;
-}
+function num(v) { return v == null ? 0 : Number(v); }
+function fmt(v) { return v == null || v === "" || isNaN(v) ? "" : Number(v).toLocaleString(); }

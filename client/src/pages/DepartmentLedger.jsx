@@ -76,7 +76,22 @@ export default function DepartmentLedger() {
     return res;
   }, [rows, searchTerm, fromDate, toDate]);
 
-  const withBalance = useMemo(() => calcBalance(filtered), [filtered]);
+  const withBalance = useMemo(() => {
+    const sortedAsc = [...filtered].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (a.id || 0) - (b.id || 0);
+    });
+
+    let bal = 0;
+    const withBal = sortedAsc.map((r) => {
+      const dep = Number(r.deposit || 0);
+      const cost = Number(r.cost || 0);
+      bal += dep - cost;
+      return { ...r, netBalance: bal };
+    });
+
+    return withBal.reverse();
+  }, [filtered]);
 
   const pageRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -180,21 +195,23 @@ export default function DepartmentLedger() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Departmental Ledger</h1>
+    <article aria-labelledby="department-ledger-title">
+      <header className="flex items-center justify-between mb-4">
+        <h1 id="department-ledger-title" className="text-xl font-semibold">Departmental Ledger</h1>
         <div className="flex gap-2">
           <button 
             onClick={() => exportToPDF("Departmental Ledger", withBalance)}
             className="flex items-center gap-1 px-2 py-1 text-xs border border-slate-300 rounded hover:bg-slate-50 transition"
+            aria-label="Download as PDF"
           >
-            <Download size={14} /> PDF
+            <Download size={14} aria-hidden="true" /> PDF
           </button>
           <button 
             onClick={() => exportToExcel("Departmental Ledger", withBalance)}
             className="flex items-center gap-1 px-2 py-1 text-xs border border-slate-300 rounded hover:bg-slate-50 transition"
+            aria-label="Download as Excel"
           >
-            <Download size={14} /> Excel
+            <Download size={14} aria-hidden="true" /> Excel
           </button>
           {canAdd && (
             <button
@@ -204,20 +221,22 @@ export default function DepartmentLedger() {
                 setMsg("");
                 setShowAddModal(true);
               }}
+              aria-label="Add new row"
             >
               Add Row
             </button>
           )}
         </div>
-      </div>
+      </header>
 
-      <div className="bg-slate-50 p-3 rounded-lg border mb-4">
+      <section aria-label="Filters" className="bg-slate-50 p-3 rounded-lg border mb-4">
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Search</label>
+            <label htmlFor="dept-ledger-search" className="block text-xs font-medium text-slate-500 mb-1">Search</label>
             <div className="relative">
-              <Search size={16} className="absolute left-2.5 top-2.5 text-slate-400" />
+              <Search size={16} className="absolute left-2.5 top-2.5 text-slate-400" aria-hidden="true" />
               <input 
+                id="dept-ledger-search"
                 type="text"
                 placeholder="Description, voucher, signature..."
                 value={searchTerm}
@@ -227,8 +246,9 @@ export default function DepartmentLedger() {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">From Date</label>
+            <label htmlFor="dept-from-date" className="block text-xs font-medium text-slate-500 mb-1">From Date</label>
             <input 
+              id="dept-from-date"
               type="date"
               value={fromDate}
               onChange={e => setFromDate(e.target.value)}
@@ -236,8 +256,9 @@ export default function DepartmentLedger() {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">To Date</label>
+            <label htmlFor="dept-to-date" className="block text-xs font-medium text-slate-500 mb-1">To Date</label>
             <input 
+              id="dept-to-date"
               type="date"
               value={toDate}
               onChange={e => setToDate(e.target.value)}
@@ -247,21 +268,22 @@ export default function DepartmentLedger() {
           <button 
             onClick={clearFilters}
             className="px-3 py-2 text-sm border border-slate-300 rounded bg-white hover:bg-slate-50 transition"
+            aria-label="Clear all filters"
           >
             Clear Filters
           </button>
         </div>
-        <div className="mt-2 text-xs text-slate-500">
+        <div className="mt-2 text-xs text-slate-500" aria-live="polite">
           {filtered.length} results found
         </div>
-      </div>
+      </section>
 
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div role="dialog" aria-modal="true" aria-labelledby="add-modal-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-lg font-semibold">Add Departmental Ledger Entry</h2>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
+              <h2 id="add-modal-title" className="text-lg font-semibold">Add Departmental Ledger Entry</h2>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600" aria-label="Close modal"><X size={24} aria-hidden="true" /></button>
             </div>
 
             <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -302,7 +324,7 @@ export default function DepartmentLedger() {
               </div>
             </div>
 
-            {msg && <p className="px-4 text-sm text-red-600">{msg}</p>}
+            {msg && <p className="px-4 text-sm text-red-600" role="alert">{msg}</p>}
 
             <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
               <button className="px-4 py-2 rounded border bg-white" onClick={() => setShowAddModal(false)}>Cancel</button>
@@ -313,21 +335,21 @@ export default function DepartmentLedger() {
       )}
 
       {viewVoucher && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+        <div role="dialog" aria-modal="true" aria-labelledby="voucher-modal-title" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
           <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b">
-              <h3 className="font-semibold">{viewVoucher.name}</h3>
-              <button onClick={() => setViewVoucher(null)}><X size={24} /></button>
+              <h3 id="voucher-modal-title" className="font-semibold">{viewVoucher.name}</h3>
+              <button onClick={() => setViewVoucher(null)} aria-label="Close modal"><X size={24} aria-hidden="true" /></button>
             </div>
             <div className="p-4 flex justify-center bg-slate-100 min-h-[300px] items-center">
               {viewVoucher.data.startsWith("data:application/pdf") ? (
                 <div className="text-center">
-                  <FileText size={64} className="mx-auto text-slate-400 mb-4" />
+                  <FileText size={64} className="mx-auto text-slate-400 mb-4" aria-hidden="true" />
                   <p className="mb-4 text-slate-600">This is a PDF document.</p>
-                  <a href={viewVoucher.data} download={viewVoucher.name} className="px-6 py-2 bg-slate-900 text-white rounded">Download PDF</a>
+                  <a href={viewVoucher.data} download={viewVoucher.name} className="px-6 py-2 bg-slate-900 text-white rounded" aria-label={`Download PDF: ${viewVoucher.name}`}>Download PDF</a>
                 </div>
               ) : (
-                <img src={viewVoucher.data} alt="Voucher" className="max-h-[70vh] object-contain shadow-md" />
+                <img src={viewVoucher.data} alt={`Voucher: ${viewVoucher.name}`} className="max-h-[70vh] object-contain shadow-md" />
               )}
             </div>
           </div>
@@ -338,17 +360,17 @@ export default function DepartmentLedger() {
         <table ref={tableRef} className="min-w-full text-sm">
           <thead className="bg-slate-50 border-b">
             <tr>
-              <Th>No</Th>
-              <Th>Date</Th>
-              <Th>Voucher No</Th>
-              <Th>Deposit</Th>
-              <Th>Cost</Th>
-              <Th>Tax</Th>
-              <Th>Description</Th>
-              <Th>Signature</Th>
-              <Th>Balance</Th>
-              <Th className="no-print">Files</Th>
-              {isAdmin && <Th className="no-print">Actions</Th>}
+              <Th scope="col">No</Th>
+              <Th scope="col">Date</Th>
+              <Th scope="col">Voucher No</Th>
+              <Th scope="col">Deposit</Th>
+              <Th scope="col">Cost</Th>
+              <Th scope="col">Tax</Th>
+              <Th scope="col">Description</Th>
+              <Th scope="col">Signature</Th>
+              <Th scope="col">Balance</Th>
+              <Th scope="col" className="no-print">Files</Th>
+              {isAdmin && <Th scope="col" className="no-print">Actions</Th>}
             </tr>
           </thead>
           <tbody>
@@ -357,25 +379,25 @@ export default function DepartmentLedger() {
                 {editingId === r.id ? (
                   <>
                     <Td>{r.no}</Td>
-                    <Td><input type="date" className="border rounded px-2 py-1 w-32" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></Td>
-                    <Td><input className="border rounded px-2 py-1 w-32" value={editForm.voucherNo} onChange={e => setEditForm({...editForm, voucherNo: e.target.value})} /></Td>
-                    <Td><input className="border rounded px-2 py-1 w-24" value={editForm.deposit} onChange={e => setEditForm({...editForm, deposit: e.target.value})} /></Td>
-                    <Td><input className="border rounded px-2 py-1 w-24" value={editForm.cost} onChange={e => setEditForm({...editForm, cost: e.target.value})} /></Td>
+                    <Td><input type="date" aria-label="Edit date" className="border rounded px-2 py-1 w-32" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></Td>
+                    <Td><input aria-label="Edit voucher number" className="border rounded px-2 py-1 w-32" value={editForm.voucherNo} onChange={e => setEditForm({...editForm, voucherNo: e.target.value})} /></Td>
+                    <Td><input aria-label="Edit deposit" className="border rounded px-2 py-1 w-24" value={editForm.deposit} onChange={e => setEditForm({...editForm, deposit: e.target.value})} /></Td>
+                    <Td><input aria-label="Edit cost" className="border rounded px-2 py-1 w-24" value={editForm.cost} onChange={e => setEditForm({...editForm, cost: e.target.value})} /></Td>
                     <Td>
-                      <select className="border rounded px-2 py-1 w-32" value={editForm.taxTypeId} onChange={e => setEditForm({...editForm, taxTypeId: e.target.value})}>
+                      <select aria-label="Edit tax type" className="border rounded px-2 py-1 w-32" value={editForm.taxTypeId} onChange={e => setEditForm({...editForm, taxTypeId: e.target.value})}>
                         <option value="">No Tax</option>
                         {taxes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                     </Td>
-                    <Td><input className="border rounded px-2 py-1 w-48" value={editForm.description} onChange={e => setEditForm({...editForm, description: e.target.value})} /></Td>
-                    <Td><input className="border rounded px-2 py-1 w-32" value={editForm.signature} onChange={e => setEditForm({...editForm, signature: e.target.value})} /></Td>
+                    <Td><input aria-label="Edit description" className="border rounded px-2 py-1 w-48" value={editForm.description} onChange={e => setEditForm({...editForm, description: e.target.value})} /></Td>
+                    <Td><input aria-label="Edit signature" className="border rounded px-2 py-1 w-32" value={editForm.signature} onChange={e => setEditForm({...editForm, signature: e.target.value})} /></Td>
                     <Td className={r.netBalance >= 0 ? "text-green-700 font-medium" : "text-red-700 font-medium"}>{fmt(r.netBalance)}</Td>
                     <Td className="no-print">-</Td>
                     {isAdmin && (
                       <Td className="no-print">
                         <div className="flex gap-1">
-                          <button className="px-2 py-1 text-white bg-emerald-600 rounded" onClick={onSave}>Save</button>
-                          <button className="px-2 py-1 bg-slate-200 rounded" onClick={() => setEditingId(null)}>Cancel</button>
+                          <button className="px-2 py-1 text-white bg-emerald-600 rounded" onClick={onSave} aria-label={`Save changes for row ${r.no}`}>Save</button>
+                          <button className="px-2 py-1 bg-slate-200 rounded" onClick={() => setEditingId(null)} aria-label="Cancel editing">Cancel</button>
                         </div>
                       </Td>
                     )}
@@ -397,16 +419,17 @@ export default function DepartmentLedger() {
                           onClick={() => setViewVoucher({ name: r.voucherFileName, data: r.voucherFileData })}
                           className="p-1.5 text-slate-500 hover:text-slate-900 bg-slate-100 rounded-full transition"
                           title="View Voucher"
+                          aria-label={`View voucher for row ${r.no}`}
                         >
-                          <Paperclip size={16} />
+                          <Paperclip size={16} aria-hidden="true" />
                         </button>
                       )}
                     </Td>
                     {isAdmin && (
                       <Td className="no-print">
                         <div className="flex gap-1">
-                          <button className="p-1.5 bg-slate-100 text-slate-700 rounded hover:bg-slate-200 transition" onClick={() => onEdit(r)} title="Edit"><Eye size={16} /></button>
-                          <button className="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 transition" onClick={() => onDelete(r.id)} title="Delete"><X size={16} /></button>
+                          <button className="p-1.5 bg-slate-100 text-slate-700 rounded hover:bg-slate-200 transition" onClick={() => onEdit(r)} title="Edit" aria-label={`Edit row ${r.no}`}><Eye size={16} aria-hidden="true" /></button>
+                          <button className="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 transition" onClick={() => onDelete(r.id)} title="Delete" aria-label={`Delete row ${r.no}`}><X size={16} aria-hidden="true" /></button>
                         </div>
                       </Td>
                     )}
@@ -420,40 +443,31 @@ export default function DepartmentLedger() {
           </tbody>
         </table>
 
-        <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t text-sm">
+        <nav aria-label="Table pagination" className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t text-sm">
           <div className="text-slate-500">
             Showing {startIndex}-{endIndex} of {withBalance.length}
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-slate-500">Rows:</span>
-              <select className="border rounded px-1 py-1 bg-white outline-none" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}>
+              <label htmlFor="dept-rows-per-page" className="text-slate-500">Rows:</label>
+              <select id="dept-rows-per-page" className="border rounded px-1 py-1 bg-white outline-none" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}>
                 {[10, 25, 50, 100].map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </div>
             <div className="flex items-center gap-1">
-              <button className="px-3 py-1 border rounded bg-white hover:bg-slate-50 disabled:opacity-50" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>Prev</button>
+              <button className="px-3 py-1 border rounded bg-white hover:bg-slate-50 disabled:opacity-50" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} aria-label="Previous page">Prev</button>
               <span className="px-3 py-1">Page {page} of {totalPages}</span>
-              <button className="px-3 py-1 border rounded bg-white hover:bg-slate-50 disabled:opacity-50" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next</button>
+              <button className="px-3 py-1 border rounded bg-white hover:bg-slate-50 disabled:opacity-50" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} aria-label="Next page">Next</button>
             </div>
           </div>
-        </div>
+        </nav>
       </div>
-    </div>
+    </article>
   );
 }
 
-const Th = ({ children, className = "" }) => <th className={`text-left px-4 py-3 font-semibold text-slate-700 ${className}`}>{children}</th>;
+const Th = ({ children, className = "", ...props }) => <th className={`text-left px-4 py-3 font-semibold text-slate-700 ${className}`} {...props}>{children}</th>;
 const Td = ({ children, className = "" }) => <td className={`px-4 py-3 text-slate-600 ${className}`}>{children}</td>;
 
 function toNumber(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 function fmt(v) { return v == null || v === "" ? "" : Number(v).toLocaleString(); }
-function calcBalance(rows) {
-  let bal = 0;
-  return rows.map((r) => {
-    const dep = Number(r.deposit || 0);
-    const cost = Number(r.cost || 0);
-    bal += dep - cost;
-    return { ...r, netBalance: bal };
-  });
-}

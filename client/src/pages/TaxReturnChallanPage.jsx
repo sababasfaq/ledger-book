@@ -256,8 +256,23 @@ export default function TaxReturnChallanPage() {
     setTimeout(() => window.print(), 100);
   };
 
+  const challanRows = useMemo(() => {
+    if (selectedRows.length > 0) {
+      return selectedRows.map(r => ({
+        source: r.description || "কর্তনকৃত ভ্যাট প্রদান",
+        description: r.taxTypeName || form.taxType || "ভ্যাট",
+        amount: r.cost || 0,
+      }));
+    }
+    return [{
+      source: "বিভিন্ন প্রতিষ্ঠান থেকে কর্তনকৃত ভ্যাট প্রদান",
+      description: form.taxType || "ভ্যাট প্রদান",
+      amount: form.amount || 0,
+    }];
+  }, [selectedRows, form.taxType, form.amount]);
+
   return (
-    <div className="min-h-screen bg-slate-50 pb-20 print:bg-white print:pb-0 font-sans">
+    <article className="min-h-screen bg-slate-50 pb-20 print:bg-white print:pb-0 font-sans" aria-labelledby="challan-page-title">
       <style>{`
         @media print {
           @page { size: A4 portrait; margin: 5mm; }
@@ -270,20 +285,20 @@ export default function TaxReturnChallanPage() {
 
       {/* Toast Notification */}
       {toast.show && (
-        <div className={`fixed top-20 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-xl border animate-in slide-in-from-right duration-300 ${
+        <div role="status" aria-live="polite" className={`fixed top-20 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-xl border animate-in slide-in-from-right duration-300 ${
           toast.type === "success" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-red-50 border-red-200 text-red-800"
         }`}>
-          {toast.type === "success" ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
+          {toast.type === "success" ? <CheckCircle size={18} aria-hidden="true" /> : <AlertCircle size={18} aria-hidden="true" />}
           <span className="text-sm font-medium">{toast.message}</span>
         </div>
       )}
 
-      <div className="mx-auto max-w-5xl px-4 py-6">
+      <div className="max-w-7xl mx-auto py-6">
         {/* Top Bar */}
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-4 print-hide">
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-4 print-hide">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-              <FileText className="text-slate-400" />
+            <h1 id="challan-page-title" className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+              <FileText className="text-slate-400" aria-hidden="true" />
               VAT Challan / চালান ফরম
             </h1>
             {selectedRows.length > 0 && (
@@ -297,27 +312,30 @@ export default function TaxReturnChallanPage() {
             <button 
               onClick={handleClear}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition"
+              aria-label="Clear all form fields"
             >
-              <RotateCcw size={18} />
+              <RotateCcw size={18} aria-hidden="true" />
               Clear Form
             </button>
             <button 
               onClick={handleSave}
               disabled={saving}
               className="flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg shadow-emerald-100 transition disabled:opacity-50"
+              aria-label="Save challan to history"
             >
-              {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+              {saving ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Save size={18} aria-hidden="true" />}
               Save Challan
             </button>
             <button 
               onClick={handlePrint}
               className="flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-lg shadow-slate-200 transition"
+              aria-label="Print challan"
             >
-              <Printer size={18} />
+              <Printer size={18} aria-hidden="true" />
               Print
             </button>
           </div>
-        </div>
+        </header>
 
         {/* Form Sections */}
         <div className="space-y-6 print-hide">
@@ -328,9 +346,9 @@ export default function TaxReturnChallanPage() {
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">তারিখ (Date)</label>
                 <div className="flex gap-2">
-                  <input name="dateDay" value={form.dateDay} onChange={handleChange} placeholder="DD" className={`w-16 px-3 py-2 rounded-xl border text-center outline-none focus:ring-4 transition ${errors.dateDay ? 'border-red-300 bg-red-50 focus:ring-red-100' : 'border-slate-200 focus:ring-slate-100'}`} />
-                  <input name="dateMonth" value={form.dateMonth} onChange={handleChange} placeholder="MM" className={`w-16 px-3 py-2 rounded-xl border text-center outline-none focus:ring-4 transition ${errors.dateMonth ? 'border-red-300 bg-red-50 focus:ring-red-100' : 'border-slate-200 focus:ring-slate-100'}`} />
-                  <input name="dateYear" value={form.dateYear} onChange={handleChange} placeholder="YYYY" className={`w-24 px-3 py-2 rounded-xl border text-center outline-none focus:ring-4 transition ${errors.dateYear ? 'border-red-300 bg-red-50 focus:ring-red-100' : 'border-slate-200 focus:ring-slate-100'}`} />
+                  <input name="dateDay" aria-label="Day" value={form.dateDay} onChange={handleChange} placeholder="DD" className={`w-16 px-3 py-2 rounded-xl border text-center outline-none focus:ring-4 transition ${errors.dateDay ? 'border-red-300 bg-red-50 focus:ring-red-100' : 'border-slate-200 focus:ring-slate-100'}`} />
+                  <input name="dateMonth" aria-label="Month" value={form.dateMonth} onChange={handleChange} placeholder="MM" className={`w-16 px-3 py-2 rounded-xl border text-center outline-none focus:ring-4 transition ${errors.dateMonth ? 'border-red-300 bg-red-50 focus:ring-red-100' : 'border-slate-200 focus:ring-slate-100'}`} />
+                  <input name="dateYear" aria-label="Year" value={form.dateYear} onChange={handleChange} placeholder="YYYY" className={`w-24 px-3 py-2 rounded-xl border text-center outline-none focus:ring-4 transition ${errors.dateYear ? 'border-red-300 bg-red-50 focus:ring-red-100' : 'border-slate-200 focus:ring-slate-100'}`} />
                 </div>
               </div>
               <Field label="কর পর্ব (Tax Period)" name="taxPeriod" value={form.taxPeriod} onChange={handleChange} placeholder="e.g. July 2024" />
@@ -388,22 +406,22 @@ export default function TaxReturnChallanPage() {
         </div>
 
         {/* Saved Challans List */}
-        <div className="mt-12 space-y-6 print-hide">
+        <section aria-labelledby="history-title" className="mt-12 space-y-6 print-hide">
           <div className="flex items-center gap-4">
-            <History className="text-slate-400" />
-            <h2 className="text-xl font-bold text-slate-900">Saved Challans (চালান ইতিহাস)</h2>
+            <History className="text-slate-400" aria-hidden="true" />
+            <h2 id="history-title" className="text-xl font-bold text-slate-900">Saved Challans (চালান ইতিহাস)</h2>
             <div className="h-px flex-1 bg-slate-200"></div>
           </div>
 
           <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
             {loadingHistory ? (
-              <div className="p-12 text-center text-slate-400 flex flex-col items-center gap-3">
-                <Loader2 size={32} className="animate-spin" />
+              <div className="p-12 text-center text-slate-400 flex flex-col items-center gap-3" role="status">
+                <Loader2 size={32} className="animate-spin" aria-hidden="true" />
                 <span>Loading history...</span>
               </div>
             ) : savedChallans.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
-                <FileText size={48} className="mx-auto mb-4 opacity-20" />
+                <FileText size={48} className="mx-auto mb-4 opacity-20" aria-hidden="true" />
                 <p>No challans saved yet.</p>
               </div>
             ) : (
@@ -411,12 +429,12 @@ export default function TaxReturnChallanPage() {
                 <table className="w-full text-sm text-left">
                   <thead className="bg-slate-50 border-b">
                     <tr>
-                      <th className="px-6 py-4 font-bold text-slate-700">Challan No</th>
-                      <th className="px-6 py-4 font-bold text-slate-700">Date</th>
-                      <th className="px-6 py-4 font-bold text-slate-700">Tax Type</th>
-                      <th className="px-6 py-4 font-bold text-slate-700">Amount</th>
-                      <th className="px-6 py-4 font-bold text-slate-700">Saved At</th>
-                      <th className="px-6 py-4 font-bold text-slate-700 text-right">Actions</th>
+                      <th scope="col" className="px-6 py-4 font-bold text-slate-700">Challan No</th>
+                      <th scope="col" className="px-6 py-4 font-bold text-slate-700">Date</th>
+                      <th scope="col" className="px-6 py-4 font-bold text-slate-700">Tax Type</th>
+                      <th scope="col" className="px-6 py-4 font-bold text-slate-700">Amount</th>
+                      <th scope="col" className="px-6 py-4 font-bold text-slate-700">Saved At</th>
+                      <th scope="col" className="px-6 py-4 font-bold text-slate-700 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -432,8 +450,9 @@ export default function TaxReturnChallanPage() {
                             onClick={() => loadAndPrint(c)}
                             className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition"
                             title="Print Again"
+                            aria-label={`Print challan ${c.challan_no} again`}
                           >
-                            <Printer size={18} />
+                            <Printer size={18} aria-hidden="true" />
                           </button>
                         </td>
                       </tr>
@@ -443,10 +462,10 @@ export default function TaxReturnChallanPage() {
               </div>
             )}
           </div>
-        </div>
+        </section>
 
         {/* Printable Area */}
-        <div className="challan-print-root">
+        <section aria-label="Printable challan preview" className="challan-print-root">
           <div className="mx-auto w-[190mm] bg-white text-black leading-tight text-[12px]">
             <div className="border border-black p-0">
               <div className="flex items-start justify-between border-b border-black p-4">
@@ -498,37 +517,54 @@ export default function TaxReturnChallanPage() {
               <table className="w-full border-collapse border-b border-black text-[12px]">
                 <thead>
                   <tr className="text-center font-bold">
-                    <th className="w-[18%] border-r border-black p-2">জমা প্রদানকারীর বিবরণ</th>
-                    <th className="w-[22%] border-r border-black p-2">যে ব্যক্তি/প্রতিষ্ঠানের পক্ষে টাকা জমা</th>
-                    <th className="w-[18%] border-r border-black p-2">বিবরণ</th>
-                    <th className="w-[15%] border-r border-black p-2">মুদ্রা ও নোটের বিবরণ</th>
-                    <th colSpan={2} className="w-[15%] border-r border-black p-2">টাকার অঙ্ক</th>
-                    <th className="w-[12%] p-2">বিভাগীয় নাম</th>
+                    <th scope="col" className="w-[18%] border-r border-black p-2">জমা প্রদানকারীর বিবরণ</th>
+                    <th scope="col" className="w-[22%] border-r border-black p-2">যে ব্যক্তি/প্রতিষ্ঠানের পক্ষে টাকা জমা</th>
+                    <th scope="col" className="w-[18%] border-r border-black p-2">বিবরণ</th>
+                    <th scope="col" className="w-[15%] border-r border-black p-2">মুদ্রা ও নোটের বিবরণ</th>
+                    <th scope="col" colSpan={2} className="w-[15%] border-r border-black p-2">টাকার অঙ্ক</th>
+                    <th scope="col" className="w-[12%] p-2">বিভাগীয় নাম</th>
                   </tr>
                 </thead>
                 <tbody className="text-center">
-                  <tr className="h-[200px] border-t border-black">
-                    <td className="border-r border-black p-3 align-top text-left leading-relaxed">
-                      <div className="font-bold">{form.depositorName}</div>
-                      <div>{form.depositorAddress}</div>
-                      {form.depositorTin && <div className="mt-2 text-[11px]">TIN: {form.depositorTin}</div>}
-                      {form.phone && <div className="text-[11px]">Mob: {form.phone}</div>}
-                    </td>
-                    <td className="border-r border-black p-3 align-top leading-relaxed">
-                      {form.note || "বিভিন্ন প্রতিষ্ঠান থেকে কর্তনকৃত ভ্যাট প্রদান"}
-                    </td>
-                    <td className="border-r border-black p-3 align-top leading-relaxed font-bold">
-                      {form.taxType}
-                    </td>
-                    <td className="border-r border-black p-3 align-middle">নগদ</td>
-                    <td className="border-r border-black p-3 align-middle text-[16px] font-bold">
-                      {toBanglaDigits(formatAmount(form.amount))}
-                    </td>
-                    <td className="border-r border-black p-3 align-middle">০০</td>
-                    <td className="p-3 align-top leading-relaxed text-[11px]">
-                      {form.officerName}
-                    </td>
-                  </tr>
+                  {challanRows.map((row, idx) => (
+                    <tr key={idx} className={`${idx === 0 ? 'h-[100px]' : ''} border-t border-black`}>
+                      <td className="border-r border-black p-3 align-top text-left leading-relaxed">
+                        {idx === 0 && (
+                          <>
+                            <div className="font-bold">{form.depositorName}</div>
+                            <div>{form.depositorAddress}</div>
+                            {form.depositorTin && <div className="mt-2 text-[11px]">TIN: {form.depositorTin}</div>}
+                            {form.phone && <div className="text-[11px]">Mob: {form.phone}</div>}
+                          </>
+                        )}
+                      </td>
+                      <td className="border-r border-black p-3 align-top leading-relaxed text-[13px]">
+                        {row.source}
+                      </td>
+                      <td className="border-r border-black p-3 align-top leading-relaxed font-bold text-[13px]">
+                        {row.description}
+                      </td>
+                      <td className="border-r border-black p-3 align-middle">নগদ</td>
+                      <td className="border-r border-black p-3 align-middle text-[16px] font-bold">
+                        {toBanglaDigits(formatAmount(row.amount))}
+                      </td>
+                      <td className="border-r border-black p-3 align-middle">০০</td>
+                      <td className="p-3 align-top leading-relaxed text-[11px]">
+                        {idx === 0 && form.officerName}
+                      </td>
+                    </tr>
+                  ))}
+                  {challanRows.length < 3 && (
+                    <tr className="h-[100px] border-t border-black">
+                      <td className="border-r border-black"></td>
+                      <td className="border-r border-black"></td>
+                      <td className="border-r border-black"></td>
+                      <td className="border-r border-black"></td>
+                      <td className="border-r border-black"></td>
+                      <td className="border-r border-black"></td>
+                      <td></td>
+                    </tr>
+                  )}
                   <tr className="border-t border-black font-bold">
                     <td colSpan={4} className="border-r border-black p-2 text-right">মোট টাকা-</td>
                     <td className="border-r border-black p-2 text-[16px] underline">{toBanglaDigits(formatAmount(form.amount))}</td>
@@ -562,20 +598,20 @@ export default function TaxReturnChallanPage() {
               </div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
-    </div>
+    </article>
   );
 }
 
 function Section({ title, children }) {
   return (
-    <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+    <section className="bg-white rounded-2xl border shadow-sm overflow-hidden">
       <div className="px-6 py-4 border-b bg-slate-50/50">
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">{title}</h3>
       </div>
       <div className="p-6">{children}</div>
-    </div>
+    </section>
   );
 }
 
@@ -592,21 +628,21 @@ function Field({ label, name, value, onChange, error, type = "text", placeholder
           <select name={name} value={value} onChange={onChange} className={`${baseClasses} appearance-none pr-10 bg-white`}>
             {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
           </select>
-          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} aria-hidden="true" />
         </div>
       ) : type === "textarea" ? (
         <textarea name={name} value={value} onChange={onChange} rows={rows} placeholder={placeholder} className={baseClasses} />
       ) : (
         <input type={type} name={name} value={value} onChange={onChange} placeholder={placeholder} className={baseClasses} />
       )}
-      {error && <p className="text-[10px] font-bold text-red-500 uppercase px-1 tracking-tight">{error}</p>}
+      {error && <p className="text-[10px] font-bold text-red-500 uppercase px-1 tracking-tight" role="alert">{error}</p>}
     </div>
   );
 }
 
 function CodeBoxes({ groups }) {
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-4" aria-label="Code numbers">
       {groups.map((group, groupIndex) => (
         <div key={groupIndex} className="flex items-center gap-[2px]">
           {String(group).split("").map((char, index) => (

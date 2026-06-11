@@ -20,47 +20,49 @@ export default function Dashboard() {
     });
   }, []);
 
-  if (loading) return <div className="p-8 text-center">Loading Dashboard...</div>;
-  if (!stats) return <div className="p-8 text-center text-red-600">Failed to load dashboard data.</div>;
+  if (loading) return <div className="p-8 text-center" role="status">Loading Dashboard...</div>;
+  if (!stats) return <div className="p-8 text-center text-red-600" role="alert">Failed to load dashboard data.</div>;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+    <article className="space-y-6" aria-labelledby="dashboard-title">
+      <header>
+        <h1 id="dashboard-title" className="text-2xl font-bold">Dashboard</h1>
+      </header>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <section aria-label="Key Performance Indicators" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard 
           title="Total Deposits" 
           value={stats.kpis.totalDeposits.toLocaleString()} 
-          icon={<TrendingUp className="text-green-600" />} 
+          icon={<TrendingUp className="text-green-600" aria-hidden="true" />} 
           color="bg-green-50"
         />
         <KpiCard 
           title="Total Costs" 
           value={stats.kpis.totalCosts.toLocaleString()} 
-          icon={<TrendingDown className="text-red-600" />} 
+          icon={<TrendingDown className="text-red-600" aria-hidden="true" />} 
           color="bg-red-50"
         />
         <KpiCard 
           title="Net Balance" 
           value={stats.kpis.netBalance.toLocaleString()} 
-          icon={<DollarSign className="text-blue-600" />} 
+          icon={<DollarSign className="text-blue-600" aria-hidden="true" />} 
           color="bg-blue-50"
         />
         <KpiCard 
           title="Pending Instructions" 
           value={stats.kpis.pendingInstructionsCount} 
-          icon={<FileText className="text-amber-600" />} 
+          icon={<FileText className="text-amber-600" aria-hidden="true" />} 
           color="bg-amber-50"
         />
-      </div>
+      </section>
 
       {/* Charts and Lists */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Income vs Expense Chart */}
-        <div className="lg:col-span-2 bg-white p-4 rounded-lg border shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">Monthly Income vs Expense ({new Date().getFullYear()})</h2>
-          <div className="h-80">
+        <section aria-labelledby="chart-title" className="lg:col-span-2 bg-white p-4 rounded-lg border shadow-sm">
+          <h2 id="chart-title" className="text-lg font-semibold mb-4">Monthly Income vs Expense ({new Date().getFullYear()})</h2>
+          <div className="h-80" role="img" aria-label="Bar chart showing monthly income and expenses">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={stats.chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -73,33 +75,34 @@ export default function Dashboard() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </section>
 
         {/* Pending Tasks Sidebar */}
-        <div className="space-y-6">
+        <aside className="space-y-6" aria-label="Pending actions">
           {user.role === "super_admin" && (
-            <div className="bg-white p-4 rounded-lg border shadow-sm">
+            <section aria-labelledby="pending-approvals-title" className="bg-white p-4 rounded-lg border shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold">Pending Approvals</h2>
-                <Users className="text-slate-400" size={20} />
+                <h2 id="pending-approvals-title" className="text-lg font-semibold">Pending Approvals</h2>
+                <Users className="text-slate-400" size={20} aria-hidden="true" />
               </div>
               <div className="text-3xl font-bold mb-4">{stats.pendingApprovals}</div>
               <NavLink 
                 to="/admin/users" 
                 className="block w-full text-center py-2 px-4 bg-slate-900 text-white rounded hover:bg-slate-800 transition"
+                aria-label={`Go to user approvals, ${stats.pendingApprovals} pending`}
               >
                 Go to Approvals
               </NavLink>
-            </div>
+            </section>
           )}
 
-          <div className="bg-white p-4 rounded-lg border shadow-sm">
+          <section aria-labelledby="pending-instructions-title" className="bg-white p-4 rounded-lg border shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Pending Instructions</h2>
-              <Clock className="text-slate-400" size={20} />
+              <h2 id="pending-instructions-title" className="text-lg font-semibold">Pending Instructions</h2>
+              <Clock className="text-slate-400" size={20} aria-hidden="true" />
             </div>
             {stats.pendingInstructions.length > 0 ? (
-              <ul className="space-y-3">
+              <ul role="list" className="space-y-3">
                 {stats.pendingInstructions.map(inst => (
                   <li key={inst.id} className="text-sm border-b pb-2 last:border-0">
                     <div className="font-medium">{inst.title}</div>
@@ -113,25 +116,26 @@ export default function Dashboard() {
             <NavLink 
               to="/instructions" 
               className="mt-4 block text-center py-2 px-4 border border-slate-300 rounded hover:bg-slate-50 transition text-sm"
+              aria-label="View all instructions"
             >
               View All
             </NavLink>
-          </div>
-        </div>
+          </section>
+        </aside>
       </div>
 
       {/* Recent Transactions Table */}
-      <div className="bg-white p-4 rounded-lg border shadow-sm overflow-hidden">
-        <h2 className="text-lg font-semibold mb-4">Recent Transactions</h2>
+      <section aria-labelledby="recent-transactions-title" className="bg-white p-4 rounded-lg border shadow-sm overflow-hidden">
+        <h2 id="recent-transactions-title" className="text-lg font-semibold mb-4">Recent Transactions</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b">
               <tr>
-                <th className="text-left px-4 py-2">Date</th>
-                <th className="text-left px-4 py-2">Ledger</th>
-                <th className="text-left px-4 py-2">Description</th>
-                <th className="text-right px-4 py-2">Amount</th>
-                <th className="text-left px-4 py-2">Added By</th>
+                <th scope="col" className="text-left px-4 py-2">Date</th>
+                <th scope="col" className="text-left px-4 py-2">Ledger</th>
+                <th scope="col" className="text-left px-4 py-2">Description</th>
+                <th scope="col" className="text-right px-4 py-2">Amount</th>
+                <th scope="col" className="text-left px-4 py-2">Added By</th>
               </tr>
             </thead>
             <tbody>
@@ -154,8 +158,8 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
+      </section>
+    </article>
   );
 }
 
