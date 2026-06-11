@@ -1,42 +1,117 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { CheckCircle2, Trash2, ShieldCheck, UserCheck } from "lucide-react";
 
 export default function AdminUsers() {
   const [pending, setPending] = useState([]);
   const [approved, setApproved] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const load = async ()=>{
-    setPending(await api.listPendingUsers());
-    setApproved(await api.listApprovedUsers());
+  const load = async () => {
+    try {
+      setLoading(true);
+      const [p, a] = await Promise.all([
+        api.listPendingUsers(),
+        api.listApprovedUsers()
+      ]);
+      setPending(p || []);
+      setApproved(a || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(()=>{ load(); }, []);
+  
+  useEffect(() => { load(); }, []);
+
+  const onApprove = async (id) => {
+    if (!window.confirm("Approve this user?")) return;
+    await api.approveUser(id);
+    await load();
+  };
+
+  const onDelete = async (id) => {
+    if (!window.confirm("Delete this user?")) return;
+    await api.deleteUser(id);
+    await load();
+  };
+
+  if (loading && pending.length === 0 && approved.length === 0) {
+    return <div className="p-8 text-center text-slate-500">Loading users...</div>;
+  }
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold mb-4">User Approvals</h1>
-      <h2 className="font-medium mb-2">Pending</h2>
-      <div className="space-y-2 mb-6">
-        {pending.length===0 && <p className="text-sm text-slate-600">No pending users.</p>}
-        {pending.map(u=>(
-          <div key={u.id} className="bg-white border rounded p-3 flex justify-between">
-            <div><div className="font-medium">{u.name}</div><div className="text-sm text-slate-600">{u.email}</div></div>
-            <div className="flex gap-2">
-              <button className="px-3 py-1 bg-slate-900 text-white rounded" onClick={async()=>{ await api.approveUser(u.id); await load(); }}>Approve</button>
-              <button className="px-3 py-1 bg-slate-100 rounded" onClick={async()=>{ await api.deleteUser(u.id); await load(); }}>Delete</button>
+    <div className="p-8 space-y-10">
+      <section>
+        <div className="flex items-center gap-2 mb-6">
+          <ShieldCheck className="text-amber-500" size={20} />
+          <h2 className="text-lg font-bold text-slate-800">Pending Approval ({pending.length})</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {pending.length === 0 && (
+            <div className="col-span-full py-12 text-center border-2 border-dashed rounded-2xl text-slate-400">
+              No users waiting for approval.
             </div>
-          </div>
-        ))}
-      </div>
+          )}
+          {pending.map(u => (
+            <div key={u.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex items-center justify-between group hover:bg-white hover:shadow-md transition duration-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 font-bold">
+                  {u.name[0]}
+                </div>
+                <div>
+                  <div className="font-bold text-slate-900">{u.name}</div>
+                  <div className="text-xs text-slate-500">{u.email}</div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => onApprove(u.id)}
+                  className="p-2 bg-emerald-100 text-emerald-600 rounded-xl hover:bg-emerald-600 hover:text-white transition"
+                  title="Approve"
+                >
+                  <CheckCircle2 size={18} />
+                </button>
+                <button 
+                  onClick={() => onDelete(u.id)}
+                  className="p-2 bg-red-100 text-red-600 rounded-xl hover:bg-red-600 hover:text-white transition"
+                  title="Delete"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
-      <h2 className="font-medium mb-2">Approved</h2>
-      <div className="space-y-2">
-        {approved.map(u=>(
-          <div key={u.id} className="bg-white border rounded p-3 flex justify-between">
-            <div><div className="font-medium">{u.name}</div><div className="text-sm text-slate-600">{u.email}</div></div>
-            <div><span className="text-xs px-2 py-1 rounded bg-slate-100">{u.role}</span></div>
-          </div>
-        ))}
-      </div>
+      <section>
+        <div className="flex items-center gap-2 mb-6">
+          <UserCheck className="text-emerald-500" size={20} />
+          <h2 className="text-lg font-bold text-slate-800">Approved Users ({approved.length})</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {approved.map(u => (
+            <div key={u.id} className="bg-white border border-slate-100 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold">
+                {u.name[0]}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-slate-900 truncate">{u.name}</div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-tight ${
+                    u.role === 'super_admin' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {u.role === 'super_admin' ? 'Chairman' : 'Official'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 truncate">{u.email}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

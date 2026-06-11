@@ -40,6 +40,11 @@ function userDto(user) {
     email: user.email,
     pictureUrl: user.picture_url || "",
     info: user.info || "",
+    designation: user.designation || "",
+    department: user.department || "",
+    phone: user.phone || "",
+    createdAt: user.created_at,
+    approved: !!user.approved,
   };
 }
 
@@ -142,6 +147,9 @@ app.patch("/api/me", authRequired, (req, res) => {
     name = current.name,
     pictureUrl = current.picture_url || "",
     info = current.info || "",
+    designation = current.designation || "",
+    department = current.department || "",
+    phone = current.phone || "",
   } = req.body || {};
 
   if (!String(name || "").trim()) {
@@ -149,16 +157,39 @@ app.patch("/api/me", authRequired, (req, res) => {
   }
 
   db.prepare(
-    `UPDATE users SET name=?, picture_url=?, info=? WHERE id=?`
+    `UPDATE users SET name=?, picture_url=?, info=?, designation=?, department=?, phone=? WHERE id=?`
   ).run(
     String(name).trim(),
     String(pictureUrl || "").trim(),
     String(info || ""),
+    String(designation || ""),
+    String(department || ""),
+    String(phone || ""),
     req.user.id
   );
 
   const updated = db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id);
   res.json({ ok: true, user: userDto(updated) });
+});
+
+app.post("/api/me/change-password", authRequired, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: "Current and new password required" });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: "New password must be at least 6 characters" });
+  }
+
+  const user = db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id);
+  const okPass = await verifyPassword(currentPassword, user.password_hash);
+  if (!okPass) return res.status(401).json({ error: "Incorrect current password" });
+
+  const hash = await hashPassword(newPassword);
+  db.prepare(`UPDATE users SET password_hash=? WHERE id=?`).run(hash, req.user.id);
+
+  res.json({ ok: true });
 });
 
 // ADMIN

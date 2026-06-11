@@ -119,4 +119,10 @@ export const api = {
     }),
 
   getDashboardStats: () => req("/api/dashboard/stats"),
+
+  changePassword: (payload) =>
+    req("/api/me/change-password", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

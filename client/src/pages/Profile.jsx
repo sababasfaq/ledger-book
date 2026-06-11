@@ -1,27 +1,64 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuth } from "../state/AuthContext.jsx";
 import AdminUsers from "./AdminUsers.jsx";
+import { api } from "../api";
+import { 
+  Camera, 
+  Eye, 
+  EyeOff, 
+  Save, 
+  Key, 
+  Info, 
+  User, 
+  Mail, 
+  Shield, 
+  Calendar, 
+  Phone, 
+  MapPin, 
+  Briefcase, 
+  Building,
+  CheckCircle,
+  AlertCircle,
+  Loader2
+} from "lucide-react";
 
 export default function Profile() {
   const { user, updateProfile, refreshMe } = useAuth();
+  const [activeTab, setActiveTab] = useState("edit");
+  const [toast, setToast] = useState({ show: false, message: "", type: "success" });
+  const fileInputRef = useRef(null);
 
-  const [form, setForm] = useState({
+  // Edit Profile Form
+  const [profileForm, setEditForm] = useState({
     name: "",
-    pictureUrl: "",
+    designation: "",
+    department: "",
+    phone: "",
     info: "",
+    pictureUrl: "",
   });
-
-  const [msg, setMsg] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
+
+  // Change Password Form
+  const [passForm, setPassForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [passLoading, setPassLoading] = useState(false);
+  const [passMsg, setPassMsg] = useState({ message: "", type: "" });
+  const [showPass, setShowPass] = useState({ current: false, new: false, confirm: false });
 
   useEffect(() => {
     if (user) {
-      setForm({
+      setEditForm({
         name: user.name || "",
-        pictureUrl: user.pictureUrl || "",
+        designation: user.designation || "",
+        department: user.department || "",
+        phone: user.phone || "",
         info: user.info || "",
+        pictureUrl: user.pictureUrl || "",
       });
       setPreviewUrl(user.pictureUrl || "");
     }
@@ -31,169 +68,390 @@ export default function Profile() {
     refreshMe().catch(() => {});
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (previewUrl && previewUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(previewUrl);
-      }
-    };
-  }, [previewUrl]);
+  const showToast = (message, type = "success") => {
+    setToast({ show: true, message, type });
+    setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
+  };
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      setMsg("Please select a valid image file.");
+      showToast("Please select a valid image file.", "error");
       return;
     }
 
-    const maxSize = 2 * 1024 * 1024;
-    if (file.size > maxSize) {
-      setMsg("Image size must be 2MB or less.");
+    if (file.size > 2 * 1024 * 1024) {
+      showToast("Image size must be 2MB or less.", "error");
       return;
     }
 
-    setMsg("");
-    setSelectedFile(file);
-
-    const localPreview = URL.createObjectURL(file);
-    setPreviewUrl(localPreview);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result;
+      setPreviewUrl(base64);
+      setEditForm(prev => ({ ...prev, pictureUrl: base64 }));
+    };
+    reader.readAsDataURL(file);
   };
 
-  const fileToBase64 = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-  const onSave = async (e) => {
+  const onSaveProfile = async (e) => {
     e.preventDefault();
+    if (!profileForm.name.trim()) {
+      showToast("Full Name is required.", "error");
+      return;
+    }
 
     try {
       setUploading(true);
-      setMsg("");
-
-      let payload = {
-        name: form.name,
-        pictureUrl: form.pictureUrl,
-        info: form.info,
-      };
-
-      if (selectedFile) {
-        const base64 = await fileToBase64(selectedFile);
-        payload.pictureUrl = base64;
-      }
-
-      await updateProfile(payload);
-
-      setForm((prev) => ({
-        ...prev,
-        pictureUrl: payload.pictureUrl,
-      }));
-
-      setSelectedFile(null);
-      setMsg("Profile updated successfully.");
+      await updateProfile(profileForm);
+      showToast("Profile updated successfully!");
       await refreshMe();
-    } catch (e2) {
-      setMsg(e2.message || "Failed to update profile.");
+    } catch (err) {
+      showToast(err.message || "Failed to update profile.", "error");
     } finally {
       setUploading(false);
     }
   };
 
-  return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold mb-4">Profile</h1>
+  const onChangePassword = async (e) => {
+    e.preventDefault();
+    setPassMsg({ message: "", type: "" });
 
-        <form
-          onSubmit={onSave}
-          className="bg-white border rounded p-6 w-full space-y-4"
-        >
-          <div className="flex items-center gap-4">
-            <div className="w-24 h-24 rounded-full overflow-hidden border bg-slate-100 flex items-center justify-center">
-              {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt="Profile"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span className="text-slate-400 text-sm">No Image</span>
+    if (passForm.newPassword.length < 6) {
+      setPassMsg({ message: "New password must be at least 6 characters.", type: "error" });
+      return;
+    }
+    if (passForm.newPassword !== passForm.confirmPassword) {
+      setPassMsg({ message: "Passwords do not match.", type: "error" });
+      return;
+    }
+
+    try {
+      setPassLoading(true);
+      await api.changePassword({
+        currentPassword: passForm.currentPassword,
+        newPassword: passForm.newPassword,
+      });
+      setPassMsg({ message: "Password changed successfully!", type: "success" });
+      setPassForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (err) {
+      setPassMsg({ message: err.message || "Failed to change password.", type: "error" });
+    } finally {
+      setPassLoading(false);
+    }
+  };
+
+  if (!user) return <div className="p-8 text-center">Loading profile...</div>;
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500">
+      {/* Toast Notification */}
+      {toast.show && (
+        <div className={`fixed top-20 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg border animate-in slide-in-from-right duration-300 ${
+          toast.type === "success" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-red-50 border-red-200 text-red-800"
+        }`}>
+          {toast.type === "success" ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
+          <span className="text-sm font-medium">{toast.message}</span>
+        </div>
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Left Column: Summary (Read Only) */}
+        <div className="w-full lg:w-1/3 space-y-6">
+          <div className="bg-white rounded-2xl border shadow-sm p-8 text-center space-y-4">
+            <div className="relative inline-block mx-auto group">
+              <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-slate-50 shadow-inner bg-slate-100 flex items-center justify-center">
+                {previewUrl ? (
+                  <img src={previewUrl} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <User size={48} className="text-slate-300" />
+                )}
+              </div>
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute inset-0 flex items-center justify-center bg-black/40 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              >
+                <Camera size={24} />
+              </button>
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+            </div>
+
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold text-slate-900">{user.name}</h2>
+              <div className="flex items-center justify-center gap-2">
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase ${
+                  user.role === "super_admin" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
+                }`}>
+                  {user.role === "super_admin" ? "Chairman" : "Official"}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-slate-100 text-slate-600">
+                  Approved
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t space-y-3 text-left">
+              <div className="flex items-center gap-3 text-sm text-slate-600">
+                <Mail size={16} className="text-slate-400" />
+                <span className="truncate">{user.email}</span>
+              </div>
+              {user.designation && (
+                <div className="flex items-center gap-3 text-sm text-slate-600">
+                  <Briefcase size={16} className="text-slate-400" />
+                  <span>{user.designation}</span>
+                </div>
+              )}
+              {user.department && (
+                <div className="flex items-center gap-3 text-sm text-slate-600">
+                  <Building size={16} className="text-slate-400" />
+                  <span>{user.department}</span>
+                </div>
+              )}
+              <div className="flex items-center gap-3 text-sm text-slate-600">
+                <Calendar size={16} className="text-slate-400" />
+                <span>Joined {new Date(user.createdAt).toLocaleDateString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Tabs */}
+        <div className="w-full lg:w-2/3 space-y-6">
+          <div className="bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col min-h-[600px]">
+            {/* Tab Navigation */}
+            <div className="flex border-b bg-slate-50/50">
+              <button 
+                onClick={() => setActiveTab("edit")}
+                className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition border-b-2 ${
+                  activeTab === "edit" ? "border-slate-900 text-slate-900 bg-white" : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <User size={16} /> Edit Profile
+              </button>
+              <button 
+                onClick={() => setActiveTab("password")}
+                className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition border-b-2 ${
+                  activeTab === "password" ? "border-slate-900 text-slate-900 bg-white" : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Key size={16} /> Change Password
+              </button>
+              <button 
+                onClick={() => setActiveTab("info")}
+                className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition border-b-2 ${
+                  activeTab === "info" ? "border-slate-900 text-slate-900 bg-white" : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Info size={16} /> Account Info
+              </button>
+            </div>
+
+            <div className="p-8 flex-1">
+              {/* Tab 1: Edit Profile */}
+              {activeTab === "edit" && (
+                <form onSubmit={onSaveProfile} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">Full Name</label>
+                      <input 
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition" 
+                        placeholder="e.g. John Doe"
+                        value={profileForm.name}
+                        onChange={e => setEditForm({ ...profileForm, name: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">Designation</label>
+                      <input 
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition" 
+                        placeholder="e.g. Assistant Professor"
+                        value={profileForm.designation}
+                        onChange={e => setEditForm({ ...profileForm, designation: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">Department</label>
+                      <input 
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition" 
+                        placeholder="e.g. CSE"
+                        value={profileForm.department}
+                        onChange={e => setEditForm({ ...profileForm, department: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">Phone Number</label>
+                      <div className="relative">
+                        <Phone size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input 
+                          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition" 
+                          placeholder="01XXX-XXXXXX"
+                          value={profileForm.phone}
+                          onChange={e => setEditForm({ ...profileForm, phone: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-semibold text-slate-700">Address / Note</label>
+                    <textarea 
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition min-h-[120px]" 
+                      placeholder="Enter additional details..."
+                      value={profileForm.info}
+                      onChange={e => setEditForm({ ...profileForm, info: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="pt-4">
+                    <button 
+                      type="submit"
+                      disabled={uploading}
+                      className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition shadow-lg shadow-slate-200 disabled:opacity-50"
+                    >
+                      {uploading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      Save Profile Changes
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Tab 2: Change Password */}
+              {activeTab === "password" && (
+                <form onSubmit={onChangePassword} className="max-w-md space-y-6">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">Current Password</label>
+                      <div className="relative">
+                        <input 
+                          type={showPass.current ? "text" : "password"}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition" 
+                          value={passForm.currentPassword}
+                          onChange={e => setPassForm({ ...passForm, currentPassword: e.target.value })}
+                          required
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPass({ ...showPass, current: !showPass.current })}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showPass.current ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">New Password</label>
+                      <div className="relative">
+                        <input 
+                          type={showPass.new ? "text" : "password"}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition" 
+                          value={passForm.newPassword}
+                          onChange={e => setPassForm({ ...passForm, newPassword: e.target.value })}
+                          required
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPass({ ...showPass, new: !showPass.new })}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showPass.new ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-400">Minimum 6 characters</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">Confirm New Password</label>
+                      <div className="relative">
+                        <input 
+                          type={showPass.confirm ? "text" : "password"}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-4 focus:ring-slate-100 outline-none transition" 
+                          value={passForm.confirmPassword}
+                          onChange={e => setPassForm({ ...passForm, confirmPassword: e.target.value })}
+                          required
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPass({ ...showPass, confirm: !showPass.confirm })}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showPass.confirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {passMsg.message && (
+                    <div className={`p-4 rounded-xl text-sm font-medium ${passMsg.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                      {passMsg.message}
+                    </div>
+                  )}
+
+                  <button 
+                    type="submit"
+                    disabled={passLoading}
+                    className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition shadow-lg shadow-slate-200 disabled:opacity-50"
+                  >
+                    {passLoading ? <Loader2 size={18} className="animate-spin" /> : <Key size={18} />}
+                    Update Password
+                  </button>
+                </form>
+              )}
+
+              {/* Tab 3: Account Info (Read Only) */}
+              {activeTab === "info" && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <InfoField label="User ID" value={`#${user.id.toString().padStart(4, '0')}`} icon={<Shield size={18} />} />
+                    <InfoField label="Email Address" value={user.email} icon={<Mail size={18} />} />
+                    <InfoField label="Account Type" value={user.role === 'super_admin' ? 'Chairman' : 'Official'} icon={<User size={18} />} isBadge role={user.role} />
+                    <InfoField label="Status" value="Verified & Approved" icon={<CheckCircle size={18} />} isBadge role="approved" />
+                    <InfoField label="Member Since" value={new Date(user.createdAt).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })} icon={<Calendar size={18} />} />
+                  </div>
+                </div>
               )}
             </div>
-
-            <div className="text-sm text-slate-600">
-              Upload a profile picture
-            </div>
           </div>
-
-          <div>
-            <label className="block text-sm mb-1">Full Name</label>
-            <input
-              className="border rounded px-3 py-2 w-full"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="Your name"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Profile Picture</label>
-            <input
-              type="file"
-              accept="image/*"
-              className="border rounded px-3 py-2 w-full"
-              onChange={handleFileChange}
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              Supported: image files only, up to 2MB
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Basic Information</label>
-            <textarea
-              className="border rounded px-3 py-2 w-full min-h-32"
-              value={form.info}
-              onChange={(e) => setForm({ ...form, info: e.target.value })}
-              placeholder="Write your department info, designation, phone, address, etc."
-            />
-          </div>
-
-          {user?.email && (
-            <div className="text-sm text-slate-600">Email: {user.email}</div>
-          )}
-
-          {msg && (
-            <p
-              className={`text-sm ${
-                msg.toLowerCase().includes("success")
-                  ? "text-emerald-700"
-                  : "text-red-600"
-              }`}
-            >
-              {msg}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={uploading}
-            className="px-4 py-2 rounded bg-slate-900 text-white disabled:opacity-50"
-          >
-            {uploading ? "Saving..." : "Save Profile"}
-          </button>
-        </form>
+        </div>
       </div>
 
-      {user?.role === "super_admin" && (
-        <div className="bg-white border rounded p-6">
-          <AdminUsers />
+      {/* Super Admin Section */}
+      {user.role === "super_admin" && (
+        <div className="pt-8 border-t space-y-6">
+          <div className="flex items-center gap-4">
+            <h2 className="text-2xl font-bold text-slate-900">User Management</h2>
+            <div className="h-px flex-1 bg-slate-100"></div>
+          </div>
+          <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+            <AdminUsers />
+          </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function InfoField({ label, value, icon, isBadge, role }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-slate-500">
+        {icon}
+        <span className="text-xs font-bold uppercase tracking-wider">{label}</span>
+      </div>
+      {isBadge ? (
+        <div className="flex">
+          <span className={`px-3 py-1 rounded-lg text-sm font-bold ${
+            role === 'super_admin' ? 'bg-emerald-100 text-emerald-700' : 
+            role === 'official' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-700'
+          }`}>
+            {value}
+          </span>
+        </div>
+      ) : (
+        <p className="text-lg font-semibold text-slate-800">{value}</p>
       )}
     </div>
   );

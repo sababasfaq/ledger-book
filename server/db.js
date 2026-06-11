@@ -16,7 +16,11 @@ create table if not exists users (
   role text check (role in ('super_admin','official')) not null default 'official',
   approved integer not null default 0,
   password_hash text not null,
-  require_2fa integer not null default 1
+  require_2fa integer not null default 1,
+  designation text,
+  department text,
+  phone text,
+  created_at text not null default (datetime('now','localtime'))
 );
 
 create table if not exists otps (
@@ -181,6 +185,28 @@ try {
   }
 } catch (e) {
   console.error("association_ledger schema check/migration failed:", e);
+}
+
+try {
+  const userCols = db.prepare("PRAGMA table_info(users)").all();
+  const hasDesignation = userCols.some((c) => c.name === "designation");
+  if (!hasDesignation) {
+    db.prepare("ALTER TABLE users ADD COLUMN designation TEXT").run();
+  }
+  const hasDepartment = userCols.some((c) => c.name === "department");
+  if (!hasDepartment) {
+    db.prepare("ALTER TABLE users ADD COLUMN department TEXT").run();
+  }
+  const hasPhone = userCols.some((c) => c.name === "phone");
+  if (!hasPhone) {
+    db.prepare("ALTER TABLE users ADD COLUMN phone TEXT").run();
+  }
+  const hasCreatedAt = userCols.some((c) => c.name === "created_at");
+  if (!hasCreatedAt) {
+    db.prepare("ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))").run();
+  }
+} catch (e) {
+  console.error("users table migration failed:", e);
 }
 
 for (const tableName of [
