@@ -117,4 +117,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  getDashboardStats: () => req("/api/dashboard/stats"),
 };

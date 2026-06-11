@@ -272,14 +272,18 @@ app.get("/api/ledger/:type", authRequired, (req, res) => {
     `)
     .all();
 
-  res.json(rows);
+  res.json(rows.map(r => ({
+    ...r,
+    voucherFileName: r.voucher_file_name,
+    voucherFileData: r.voucher_file_data
+  })));
 });
 
 app.post("/api/ledger/:type", authRequired, (req, res) => {
   const tbl = tableFor(req.params.type);
   if (!tbl) return res.status(400).json({ error: "invalid type" });
 
-  const { date, voucherNo, deposit, cost, description, signature, taxTypeId } =
+  const { date, voucherNo, deposit, cost, description, signature, taxTypeId, voucherFileName, voucherFileData } =
     req.body || {};
 
   if (!date || !voucherNo) {
@@ -303,8 +307,8 @@ app.post("/api/ledger/:type", authRequired, (req, res) => {
 
   const out = db
     .prepare(`
-      INSERT INTO ${tbl} (no,date,voucher_no,deposit,cost,description,signature,created_by,tax_type_id)
-      VALUES (?,?,?,?,?,?,?,?,?)
+      INSERT INTO ${tbl} (no,date,voucher_no,deposit,cost,description,signature,created_by,tax_type_id,voucher_file_name,voucher_file_data)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `)
     .run(
       noValue,
@@ -315,7 +319,9 @@ app.post("/api/ledger/:type", authRequired, (req, res) => {
       description || "",
       signature || "",
       req.user.id,
-      parseTaxTypeId(taxTypeId)
+      parseTaxTypeId(taxTypeId),
+      voucherFileName || null,
+      voucherFileData || null
     );
 
   logAction(req.user.id, tbl, "ADD", out.lastInsertRowid);
@@ -328,7 +334,12 @@ app.patch("/api/ledger/:type/:id", authRequired, superAdminOnly, (req, res) => {
   if (!tbl) return res.status(400).json({ error: "invalid type" });
 
   const id = Number(req.params.id);
-  const map = { voucherNo: "voucher_no", taxTypeId: "tax_type_id" };
+  const map = { 
+    voucherNo: "voucher_no", 
+    taxTypeId: "tax_type_id",
+    voucherFileName: "voucher_file_name",
+    voucherFileData: "voucher_file_data"
+  };
   const allowed = [
     "date",
     "voucherNo",
@@ -337,6 +348,8 @@ app.patch("/api/ledger/:type/:id", authRequired, superAdminOnly, (req, res) => {
     "description",
     "signature",
     "taxTypeId",
+    "voucherFileName",
+    "voucherFileData"
   ];
 
   const sets = [];
@@ -713,6 +726,97 @@ app.post("/api/instructions/:id/submit", authRequired, (req, res) => {
 
   logAction(req.user.id, "instruction_submissions", "ADD", out.lastInsertRowid);
   res.json({ ok: true, id: out.lastInsertRowid });
+});
+
+// DASHBOARD
+
+app.get("/api/dashboard/stats", authRequired, (req, res) => {
+  const ledgers = ["general_ledger", "unofficial_ledger", "association_ledger", "departmental_ledger"];
+  let totalDeposits = 0;
+  let totalCosts = 0;
+
+  ledgers.forEach(tbl => {
+    const d = db.prepare(`SELECT SUM(deposit) as sum FROM ${tbl}`).get();
+    const c = db.prepare(`SELECT SUM(cost) as sum FROM ${tbl}`).get();
+    totalDeposits += d?.sum || 0;
+    totalCosts += c?.sum || 0;
+  });
+
+  const pendingInstructionsCount = pendingCountForUser(req.user.id);
+
+  // Bar chart data (current year)
+  const currentYear = new Date().getFullYear();
+  const months = Array.from({ length: 12 }, (_, i) => ({
+    month: new Date(0, i).toLocaleString("default", { month: "short" }),
+    income: 0,
+    expense: 0,
+  }));
+
+  ledgers.forEach(tbl => {
+    const rows = db.prepare(`SELECT deposit, cost, date FROM ${tbl} WHERE date LIKE ?`).all(`${currentYear}-%`);
+    rows.forEach(r => {
+      const m = parseInt(r.date.split("-")[1], 10) - 1;
+      if (m >= 0 && m < 12) {
+        months[m].income += r.deposit || 0;
+        months[m].expense += r.cost || 0;
+      }
+    });
+  });
+
+  // Recent Transactions
+  let recent = [];
+  ledgers.forEach(tbl => {
+    const type = tbl.split("_")[0];
+    const rows = db.prepare(`
+      SELECT l.*, u.name as addedByName
+      FROM ${tbl} l
+      LEFT JOIN users u ON l.created_by = u.id
+      ORDER BY l.date DESC, l.id DESC LIMIT 10
+    `).all();
+    rows.forEach(r => {
+      recent.push({
+        id: r.id,
+        date: r.date,
+        type: type.charAt(0).toUpperCase() + type.slice(1),
+        description: r.description,
+        amount: r.deposit ? r.deposit : -r.cost,
+        addedBy: r.addedByName || "Unknown"
+      });
+    });
+  });
+  recent.sort((a, b) => new Date(b.date) - new Date(a.date));
+  recent = recent.slice(0, 10);
+
+  // Pending Approvals (for super_admin)
+  let pendingApprovals = 0;
+  if (req.user.role === "super_admin") {
+    const row = db.prepare("SELECT COUNT(*) as count FROM users WHERE approved=0").get();
+    pendingApprovals = row?.count || 0;
+  }
+
+  // Pending Instructions Card data
+  const pendingInstructionsList = db.prepare(`
+    SELECT i.id, i.title, i.created_at
+    FROM instructions i
+    WHERE NOT EXISTS (
+      SELECT 1 FROM instruction_submissions s
+      WHERE s.instruction_id = i.id AND s.submitted_by = ?
+    )
+    LIMIT 5
+  `).all(req.user.id);
+
+  res.json({
+    kpis: {
+      totalDeposits,
+      totalCosts,
+      netBalance: totalDeposits - totalCosts,
+      pendingInstructionsCount,
+    },
+    chartData: months,
+    recentTransactions: recent,
+    pendingApprovals,
+    pendingInstructions: pendingInstructionsList,
+  });
 });
 
 const port = process.env.PORT || 4000;

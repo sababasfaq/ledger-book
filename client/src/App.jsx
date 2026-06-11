@@ -3,6 +3,7 @@ import { NavLink, Routes, Route, Navigate } from "react-router-dom";
 import { api } from "./api";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Login from "./pages/Login.jsx";
+import Dashboard from "./pages/Dashboard.jsx";
 import GeneralLedger from "./pages/GeneralLedger.jsx";
 import UnofficialLedger from "./pages/UnofficialLedger.jsx";
 import StudentAssociation from "./pages/StudentAssociation.jsx";
@@ -16,35 +17,52 @@ import TaxPage from "./pages/TaxPage.jsx";
 import Profile from "./pages/Profile.jsx";
 import TaxReturnChallanPage from "./pages/TaxReturnChallanPage.jsx";
 import InstructionsPage from "./pages/InstructionsPage.jsx";
+import ReportsPage from "./pages/ReportsPage.jsx";
 import logoImg from "./assets/logo.png";
 import uniBg from "./assets/uni.png";
+import { Bell, ChevronDown } from "lucide-react";
 
 export default function App() {
   const { user, logout } = useAuth();
   const [instructionBadge, setInstructionBadge] = useState(0);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
 
-  const refreshInstructionBadge = async () => {
-    if (!user || user.role === "super_admin") {
-      setInstructionBadge(0);
-      return;
+  const refreshBadges = async () => {
+    if (!user) return;
+    
+    if (user.role === "official") {
+      try {
+        const { count } = await api.getInstructionsPendingCount();
+        setInstructionBadge(count ?? 0);
+      } catch {
+        setInstructionBadge(0);
+      }
     }
-    try {
-      const { count } = await api.getInstructionsPendingCount();
-      setInstructionBadge(count ?? 0);
-    } catch {
-      setInstructionBadge(0);
+
+    if (user.role === "super_admin") {
+      try {
+        const list = await api.listPendingUsers();
+        setPendingApprovals(list.length || 0);
+      } catch {
+        setPendingApprovals(0);
+      }
     }
   };
 
   useEffect(() => {
-    refreshInstructionBadge();
+    refreshBadges();
+    const interval = setInterval(refreshBadges, 60000);
+    return () => clearInterval(interval);
   }, [user]);
 
   useEffect(() => {
-    const onUpdate = () => refreshInstructionBadge();
+    const onUpdate = () => refreshBadges();
     window.addEventListener("instructions-updated", onUpdate);
     return () => window.removeEventListener("instructions-updated", onUpdate);
   }, [user]);
+
+  const badgeCount = user?.role === "super_admin" ? pendingApprovals : instructionBadge;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -56,7 +74,7 @@ export default function App() {
       )}
 
       <div className="relative z-10">
-        <header className="sticky top-0 bg-white border-b">
+        <header className="sticky top-0 bg-white border-b shadow-sm">
           <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <img
@@ -64,59 +82,100 @@ export default function App() {
                 alt="App Logo"
                 className="w-10 h-10 object-contain"
               />
-              <div className="font-semibold">Ledger Book</div>
+              <div className="font-semibold text-lg">Ledger Book</div>
             </div>
 
             {user ? (
-              <div className="flex items-center gap-3">
-                {user.role === "official" && instructionBadge > 0 && (
-                  <NavLink
-                    to="/instructions"
-                    className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-50 border border-red-200 text-red-700 text-sm hover:bg-red-100"
+              <div className="flex items-center gap-4">
+                {/* Notification Bell */}
+                <div className="relative">
+                  <button 
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    className="p-2 rounded-full hover:bg-slate-100 transition relative"
                   >
-                    <span className="font-medium">{instructionBadge}</span>
-                    <span>instruction{instructionBadge !== 1 ? "s" : ""} to do</span>
+                    <Bell size={22} className="text-slate-600" />
+                    {badgeCount > 0 && (
+                      <span className="absolute top-1 right-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border-2 border-white">
+                        {badgeCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {showNotifications && (
+                    <div className="absolute right-0 mt-2 w-72 bg-white border rounded-lg shadow-xl z-50 overflow-hidden">
+                      <div className="p-3 border-b bg-slate-50 font-semibold text-sm">Notifications</div>
+                      <div className="max-h-80 overflow-y-auto">
+                        {user.role === "super_admin" && pendingApprovals > 0 && (
+                          <NavLink 
+                            to="/admin/users" 
+                            onClick={() => setShowNotifications(false)}
+                            className="block p-4 hover:bg-slate-50 border-b last:border-0"
+                          >
+                            <div className="text-sm font-medium">Pending Approvals</div>
+                            <div className="text-xs text-slate-500 mt-1">{pendingApprovals} user(s) waiting for approval.</div>
+                          </NavLink>
+                        )}
+                        {user.role === "official" && instructionBadge > 0 && (
+                          <NavLink 
+                            to="/instructions" 
+                            onClick={() => setShowNotifications(false)}
+                            className="block p-4 hover:bg-slate-50 border-b last:border-0"
+                          >
+                            <div className="text-sm font-medium">Pending Instructions</div>
+                            <div className="text-xs text-slate-500 mt-1">You have {instructionBadge} instruction(s) to complete.</div>
+                          </NavLink>
+                        )}
+                        {badgeCount === 0 && (
+                          <div className="p-8 text-center text-slate-400 text-sm">No new notifications</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 border-l pl-4">
+                  <img
+                    src={user.pictureUrl || logoImg}
+                    alt="Profile"
+                    className="w-10 h-10 rounded-full object-cover border"
+                    onError={(e) => {
+                      e.currentTarget.src = logoImg;
+                    }}
+                  />
+
+                  <NavLink
+                    to="/profile"
+                    className="text-right hover:opacity-80 transition"
+                  >
+                    <div className="text-sm font-medium leading-tight">
+                      {user.name}
+                    </div>
+                    <div className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 inline-block mt-1">
+                      {user.role.toUpperCase()}
+                    </div>
                   </NavLink>
-                )}
-                <img
-                  src={user.pictureUrl || logoImg}
-                  alt="Profile"
-                  className="w-10 h-10 rounded-full object-cover border"
-                  onError={(e) => {
-                    e.currentTarget.src = logoImg;
-                  }}
-                />
 
-                <NavLink
-                  to="/profile"
-                  className="text-right hover:opacity-80 transition"
-                >
-                  <div className="text-sm font-medium leading-tight">
-                    {user.name}
-                  </div>
-                  <div className="text-xs px-2 py-1 rounded bg-slate-100 inline-block mt-1">
-                    {user.role.toUpperCase()}
-                  </div>
-                </NavLink>
-
-                <button
-                  className="px-3 py-1 text-sm rounded bg-slate-900 text-white"
-                  onClick={logout}
-                >
-                  Logout
-                </button>
+                  <button
+                    className="px-4 py-2 text-sm font-medium rounded bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm"
+                    onClick={logout}
+                  >
+                    Logout
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>
 
           {user && (
             <nav className="bg-slate-100/70 border-t">
-              <div className="max-w-7xl mx-auto px-4 py-2 flex gap-3 flex-wrap">
+              <div className="max-w-7xl mx-auto px-4 py-2 flex gap-2 flex-wrap">
+                <Tab to="/dashboard" label="Dashboard" />
                 <Tab to="/general-ledger" label="General Ledger" />
                 <Tab to="/unofficial-ledger" label="Unofficial Ledger" />
                 <Tab to="/student-association" label="Student Association" />
                 <Tab to="/department-ledger" label="Department Ledger" />
                 <Tab to="/departmental-cost" label="Departmental Cost" />
+                <Tab to="/reports" label="Reports" />
                 <Tab to="/tax-return-challan" label="Tax Return Challan" />
                 <Tab
                   to="/instructions"
@@ -139,7 +198,23 @@ export default function App() {
             <Route
               path="/"
               element={
-                user ? <Navigate to="/general-ledger" replace /> : <Login />
+                user ? <Navigate to="/dashboard" replace /> : <Login />
+              }
+            />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute>
+                  <ReportsPage />
+                </ProtectedRoute>
               }
             />
             <Route

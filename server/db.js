@@ -198,8 +198,20 @@ for (const tableName of [
       ).run();
       console.log(`Added tax_type_id to ${tableName}`);
     }
+
+    const hasVoucherFileName = cols.some((c) => c.name === "voucher_file_name");
+    if (!hasVoucherFileName) {
+      db.prepare(`ALTER TABLE ${tableName} ADD COLUMN voucher_file_name TEXT`).run();
+      console.log(`Added voucher_file_name to ${tableName}`);
+    }
+
+    const hasVoucherFileData = cols.some((c) => c.name === "voucher_file_data");
+    if (!hasVoucherFileData) {
+      db.prepare(`ALTER TABLE ${tableName} ADD COLUMN voucher_file_data TEXT`).run();
+      console.log(`Added voucher_file_data to ${tableName}`);
+    }
   } catch (e) {
-    console.error(`Failed adding tax_type_id to ${tableName}:`, e);
+    console.error(`Failed updating ${tableName}:`, e);
   }
 }
 
