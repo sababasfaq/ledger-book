@@ -1,36 +1,24 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { BackupService } from "./backups.js";
+import { financeRouter } from "./finance-routes.js";
+import { LocalOcr, LocalModel } from "./local-ai-runtime.js";
+import { AiService } from "./ai-service.js";
+import { createAiRouter } from "./ai-routes.js";
+import { FinanceService, HttpError, dateValue, writeAudit } from "./finance.js";
 import { db } from "./db.js";
 import { authRequired, superAdminOnly } from "./middleware.js";
-import {
-  createToken,
-  hashPassword,
-  verifyPassword,
-} from "./auth.js";
+import { createToken, hashPassword, verifyPassword } from "./auth.js";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
-
-const tableFor = (t) =>
-  t === "general"
-    ? "general_ledger"
-    : t === "unofficial"
-    ? "unofficial_ledger"
-    : t === "association"
-    ? "association_ledger"
-    : t === "departmental"
-    ? "departmental_ledger"
-    : null;
-
-const parseTaxTypeId = (value) => {
-  if (value === "" || value == null) return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-};
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 function userDto(user) {
   return {
@@ -48,36 +36,58 @@ function userDto(user) {
   };
 }
 
-function logAction(userId, tableName, action, rowId) {
-  try {
-    const user = db
-      .prepare("SELECT name, role FROM users WHERE id = ?")
-      .get(userId);
-    const userName = user?.name || "";
-    const role = user?.role || "";
-    db.prepare(
-      "INSERT INTO logs (user_id, user_name, role, table_name, action, row_id) VALUES (?,?,?,?,?,?)"
-    ).run(userId, userName, role, tableName, action, rowId ?? null);
-  } catch (err) {
-    console.error("Failed to log action:", err);
+const finance = new FinanceService(db);
+const ocr = new LocalOcr();
+const model = new LocalModel();
+app.locals.ai = new AiService({ db, finance, ocr, model });
+app.use(
+  "/api/ai",
+  createAiRouter(() => app.locals.ai, authRequired),
+);
+const backups = new BackupService(
+  db,
+  process.env.BACKUP_DIR ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "backups"),
+);
+
+function logAction(
+  userId,
+  tableName,
+  action,
+  rowId,
+  before = null,
+  after = null,
+  reason = "",
+) {
+  const actor = db
+    .prepare("SELECT id,name,role FROM users WHERE id=?")
+    .get(userId);
+  if (
+    !before &&
+    !after &&
+    action === "ADD" &&
+    ["tax_return_challans", "instructions", "instruction_submissions"].includes(
+      tableName,
+    )
+  ) {
+    after = db.prepare("SELECT * FROM " + tableName + " WHERE id=?").get(rowId);
   }
+  writeAudit(db, actor, tableName, action, rowId, before, after, reason);
 }
 
-(async () => {
-  const admin = db.prepare(`SELECT * FROM users WHERE role='super_admin'`).get();
-  if (!admin) {
-    const pass = process.env.ADMIN_PASSWORD || "admin123";
-    const password_hash = await hashPassword(pass);
-    db.prepare(`
-      INSERT INTO users (name,email,picture_url,info,role,approved,password_hash,require_2fa)
-      VALUES ('Chairman','chairman@example.com','','Super Admin','super_admin',1,?,0)
-    `).run(password_hash);
-    console.log(
-      "✅ Seeded super admin: chairman@example.com | password:",
-      process.env.ADMIN_PASSWORD || "admin123"
+const admin = db.prepare("SELECT * FROM users WHERE role='super_admin'").get();
+if (!admin) {
+  if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD.length < 12) {
+    throw new Error(
+      "Set ADMIN_PASSWORD to at least 12 characters before creating the first Chairman account.",
     );
   }
-})();
+  const hash = await hashPassword(process.env.ADMIN_PASSWORD);
+  db.prepare(
+    "INSERT INTO users(name,email,info,role,approved,password_hash,require_2fa) VALUES('Chairman','chairman@example.com','Super Admin','super_admin',1,?,0)",
+  ).run(hash);
+  console.log("Created Chairman account: chairman@example.com");
+}
 
 // AUTH
 
@@ -91,10 +101,12 @@ app.post("/api/signup", async (req, res) => {
   if (exists) return res.status(409).json({ error: "Email already exists" });
 
   const password_hash = await hashPassword(password);
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO users (name,email,picture_url,info,role,approved,password_hash,require_2fa)
     VALUES (?,?,?,?, 'official', 0, ?, 0)
-  `).run(name, email, pictureUrl || "", info || "", password_hash);
+  `,
+  ).run(name, email, pictureUrl || "", info || "", password_hash);
 
   res.json({
     ok: true,
@@ -156,19 +168,34 @@ app.patch("/api/me", authRequired, (req, res) => {
     return res.status(400).json({ error: "Name is required" });
   }
 
-  db.prepare(
-    `UPDATE users SET name=?, picture_url=?, info=?, designation=?, department=?, phone=? WHERE id=?`
-  ).run(
-    String(name).trim(),
-    String(pictureUrl || "").trim(),
-    String(info || ""),
-    String(designation || ""),
-    String(department || ""),
-    String(phone || ""),
-    req.user.id
-  );
+  const updated = db.transaction(() => {
+    db.prepare(
+      `UPDATE users SET name=?, picture_url=?, info=?, designation=?, department=?, phone=? WHERE id=?`,
+    ).run(
+      String(name).trim(),
+      String(pictureUrl || "").trim(),
+      String(info || ""),
+      String(designation || ""),
+      String(department || ""),
+      String(phone || ""),
+      req.user.id,
+    );
 
-  const updated = db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id);
+    const updated = db
+      .prepare(`SELECT * FROM users WHERE id=?`)
+      .get(req.user.id);
+    logAction(
+      req.user.id,
+      "users",
+      "EDIT",
+      req.user.id,
+      current,
+      updated,
+      "Profile updated",
+    );
+    return updated;
+  })();
+
   res.json({ ok: true, user: userDto(updated) });
 });
 
@@ -179,55 +206,90 @@ app.post("/api/me/change-password", authRequired, async (req, res) => {
   }
 
   if (newPassword.length < 6) {
-    return res.status(400).json({ error: "New password must be at least 6 characters" });
+    return res
+      .status(400)
+      .json({ error: "New password must be at least 6 characters" });
   }
 
   const user = db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id);
   const okPass = await verifyPassword(currentPassword, user.password_hash);
-  if (!okPass) return res.status(401).json({ error: "Incorrect current password" });
+  if (!okPass)
+    return res.status(401).json({ error: "Incorrect current password" });
 
   const hash = await hashPassword(newPassword);
-  db.prepare(`UPDATE users SET password_hash=? WHERE id=?`).run(hash, req.user.id);
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE users SET password_hash=?,token_version=token_version+1 WHERE id=?`,
+    ).run(hash, req.user.id);
+    logAction(req.user.id, "users", "PASSWORD_CHANGE", req.user.id, null, {
+      sessionsRevoked: true,
+    });
+  })();
 
   res.json({ ok: true });
 });
 
 // ADMIN
 
-app.get("/api/admin/users/pending", authRequired, superAdminOnly, (_req, res) => {
-  const list = db
-    .prepare(`SELECT id,name,email,info,picture_url FROM users WHERE approved=0`)
-    .all();
-  res.json(list);
-});
+app.get(
+  "/api/admin/users/pending",
+  authRequired,
+  superAdminOnly,
+  (_req, res) => {
+    const list = db
+      .prepare(
+        `SELECT id,name,email,info,picture_url FROM users WHERE approved=0`,
+      )
+      .all();
+    res.json(list);
+  },
+);
 
 app.get("/api/admin/users", authRequired, superAdminOnly, (_req, res) => {
   const list = db
-    .prepare(`SELECT id,name,email,role,approved,picture_url,info FROM users WHERE approved=1`)
+    .prepare(
+      `SELECT id,name,email,role,approved,picture_url,info FROM users WHERE approved=1`,
+    )
     .all();
   res.json(list);
 });
 
-app.post("/api/admin/users/:id/approve", authRequired, superAdminOnly, (req, res) => {
-  db.prepare(`UPDATE users SET approved=1 WHERE id=?`).run(Number(req.params.id));
-  res.json({ ok: true });
-});
+app.post(
+  "/api/admin/users/:id/approve",
+  authRequired,
+  superAdminOnly,
+  (req, res) => {
+    db.transaction(() => {
+      const before = db
+        .prepare("SELECT id,name,email,role,approved FROM users WHERE id=?")
+        .get(Number(req.params.id));
+      if (!before) throw new HttpError(404, "User not found");
+      db.prepare("UPDATE users SET approved=1 WHERE id=?").run(before.id);
+      logAction(req.user.id, "users", "APPROVE", before.id, before, {
+        ...before,
+        approved: 1,
+      });
+    })();
+    res.json({ ok: true });
+  },
+);
 
 app.delete("/api/admin/users/:id", authRequired, superAdminOnly, (req, res) => {
-  db.prepare(`DELETE FROM users WHERE id=?`).run(Number(req.params.id));
+  db.transaction(() => {
+    const before = db
+      .prepare("SELECT id,name,email,role,approved FROM users WHERE id=?")
+      .get(Number(req.params.id));
+    if (!before) throw new HttpError(404, "User not found");
+    if (before.role === "super_admin")
+      throw new HttpError(409, "Chairman accounts cannot be deleted");
+    db.prepare("DELETE FROM users WHERE id=?").run(before.id);
+    logAction(req.user.id, "users", "DELETE", before.id, before, null);
+  })();
   res.json({ ok: true });
 });
 
-app.get("/api/admin/logs", authRequired, superAdminOnly, (_req, res) => {
-  const rows = db
-    .prepare(`
-      SELECT id, user_id, user_name, role, table_name, action, row_id, created_at
-      FROM logs
-      ORDER BY created_at DESC
-    `)
-    .all();
-  res.json(rows);
-});
+// Finance routes share the same authentication and role checks as the existing app.
+app.use("/api", financeRouter(db, authRequired, superAdminOnly, backups));
 
 // TAX TYPES
 
@@ -240,274 +302,104 @@ app.get("/api/taxes", authRequired, (_req, res) => {
 
 app.post("/api/taxes", authRequired, superAdminOnly, (req, res) => {
   const { name, percentage } = req.body || {};
-
-  if (!name || percentage == null || percentage === "") {
-    return res.status(400).json({ error: "name and percentage are required" });
-  }
-
-  const out = db
-    .prepare(`INSERT INTO tax_types (name, percentage) VALUES (?, ?)`)
-    .run(String(name).trim(), Number(percentage));
-
-  res.json({ ok: true, id: out.lastInsertRowid });
+  if (
+    !String(name || "").trim() ||
+    !Number.isFinite(Number(percentage)) ||
+    percentage === "" ||
+    percentage == null ||
+    Number(percentage) < 0 ||
+    Number(percentage) > 100
+  )
+    return res
+      .status(400)
+      .json({ error: "Provide a tax name and a percentage from 0 to 100" });
+  const id = db.transaction(() => {
+    const out = db
+      .prepare("INSERT INTO tax_types(name,percentage) VALUES(?,?)")
+      .run(String(name).trim(), Number(percentage));
+    logAction(
+      req.user.id,
+      "tax_types",
+      "ADD",
+      Number(out.lastInsertRowid),
+      null,
+      { name, percentage: Number(percentage) },
+    );
+    return Number(out.lastInsertRowid);
+  })();
+  res.status(201).json({ ok: true, id });
 });
 
 app.patch("/api/taxes/:id", authRequired, superAdminOnly, (req, res) => {
-  const { id } = req.params;
   const { name, percentage } = req.body || {};
-
-  if (!name || percentage == null || percentage === "") {
-    return res.status(400).json({ error: "name and percentage are required" });
-  }
-
-  db.prepare(`UPDATE tax_types SET name=?, percentage=? WHERE id=?`).run(
-    String(name).trim(),
-    Number(percentage),
-    Number(id)
-  );
-
+  if (
+    !String(name || "").trim() ||
+    !Number.isFinite(Number(percentage)) ||
+    percentage === "" ||
+    percentage == null ||
+    Number(percentage) < 0 ||
+    Number(percentage) > 100
+  )
+    return res
+      .status(400)
+      .json({ error: "Provide a tax name and a percentage from 0 to 100" });
+  db.transaction(() => {
+    const before = db
+      .prepare("SELECT * FROM tax_types WHERE id=?")
+      .get(Number(req.params.id));
+    if (!before) throw new HttpError(404, "Tax type not found");
+    db.prepare("UPDATE tax_types SET name=?,percentage=? WHERE id=?").run(
+      String(name).trim(),
+      Number(percentage),
+      before.id,
+    );
+    logAction(req.user.id, "tax_types", "EDIT", before.id, before, {
+      ...before,
+      name: String(name).trim(),
+      percentage: Number(percentage),
+    });
+  })();
   res.json({ ok: true });
 });
 
 app.delete("/api/taxes/:id", authRequired, superAdminOnly, (req, res) => {
-  const taxId = Number(req.params.id);
-
-  db.prepare(`UPDATE general_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
-  db.prepare(`UPDATE unofficial_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
-  db.prepare(`UPDATE association_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
-  db.prepare(`UPDATE departmental_ledger SET tax_type_id=NULL WHERE tax_type_id=?`).run(taxId);
-  db.prepare(`DELETE FROM tax_types WHERE id=?`).run(taxId);
-
-  res.json({ ok: true });
-});
-
-// LEDGERS
-
-app.get("/api/ledger/:type", authRequired, (req, res) => {
-  const tbl = tableFor(req.params.type);
-  if (!tbl) return res.status(400).json({ error: "invalid type" });
-
-  const rows = db
-    .prepare(`
-      SELECT
-        l.*,
-        u.name AS addedByName,
-        u.role AS addedByRole,
-        t.id AS taxTypeId,
-        t.name AS taxTypeName,
-        t.percentage AS taxPercentage
-      FROM ${tbl} AS l
-      LEFT JOIN users u ON l.created_by = u.id
-      LEFT JOIN tax_types t ON l.tax_type_id = t.id
-      ORDER BY l.date ASC, l.no ASC
-    `)
-    .all();
-
-  res.json(rows.map(r => ({
-    ...r,
-    voucherFileName: r.voucher_file_name,
-    voucherFileData: r.voucher_file_data
-  })));
-});
-
-app.post("/api/ledger/:type", authRequired, (req, res) => {
-  const tbl = tableFor(req.params.type);
-  if (!tbl) return res.status(400).json({ error: "invalid type" });
-
-  const { date, voucherNo, deposit, cost, description, signature, taxTypeId, voucherFileName, voucherFileData } =
-    req.body || {};
-
-  if (!date || !voucherNo) {
-    return res.status(400).json({ error: "date and voucherNo are required" });
-  }
-
-  if ((deposit == null || deposit === "") && (cost == null || cost === "")) {
-    return res.status(400).json({ error: "Either deposit or cost must be provided" });
-  }
-
-  const last = db
-    .prepare(`SELECT no FROM ${tbl} ORDER BY CAST(no AS INTEGER) DESC LIMIT 1`)
-    .get();
-
-  let nextNo = 1;
-  if (last && last.no != null) {
-    const parsed = parseInt(last.no, 10);
-    if (Number.isFinite(parsed)) nextNo = parsed + 1;
-  }
-  const noValue = String(nextNo).padStart(2, "0");
-
-  const out = db
-    .prepare(`
-      INSERT INTO ${tbl} (no,date,voucher_no,deposit,cost,description,signature,created_by,tax_type_id,voucher_file_name,voucher_file_data)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
-    `)
-    .run(
-      noValue,
-      date,
-      voucherNo,
-      deposit === "" ? null : Number(deposit),
-      cost === "" ? null : Number(cost),
-      description || "",
-      signature || "",
-      req.user.id,
-      parseTaxTypeId(taxTypeId),
-      voucherFileName || null,
-      voucherFileData || null
-    );
-
-  logAction(req.user.id, tbl, "ADD", out.lastInsertRowid);
-
-  res.json({ ok: true, id: out.lastInsertRowid, no: noValue });
-});
-
-app.patch("/api/ledger/:type/:id", authRequired, superAdminOnly, (req, res) => {
-  const tbl = tableFor(req.params.type);
-  if (!tbl) return res.status(400).json({ error: "invalid type" });
-
-  const id = Number(req.params.id);
-  const map = { 
-    voucherNo: "voucher_no", 
-    taxTypeId: "tax_type_id",
-    voucherFileName: "voucher_file_name",
-    voucherFileData: "voucher_file_data"
-  };
-  const allowed = [
-    "date",
-    "voucherNo",
-    "deposit",
-    "cost",
-    "description",
-    "signature",
-    "taxTypeId",
-    "voucherFileName",
-    "voucherFileData"
-  ];
-
-  const sets = [];
-  const vals = [];
-
-  for (const k of allowed) {
-    if (k in req.body) {
-      const col = map[k] || k;
-
-      if (k === "deposit" || k === "cost") {
-        const v = req.body[k];
-        vals.push(v === "" || v == null ? null : Number(v));
-      } else if (k === "taxTypeId") {
-        vals.push(parseTaxTypeId(req.body[k]));
-      } else {
-        vals.push(req.body[k]);
-      }
-
-      sets.push(`${col} = ?`);
+  db.transaction(() => {
+    const id = Number(req.params.id),
+      before = db.prepare("SELECT * FROM tax_types WHERE id=?").get(id);
+    if (!before) throw new HttpError(404, "Tax type not found");
+    for (const table of [
+      "general_ledger",
+      "unofficial_ledger",
+      "association_ledger",
+      "departmental_ledger",
+    ]) {
+      if (
+        db
+          .prepare("SELECT 1 FROM " + table + " WHERE tax_type_id=? LIMIT 1")
+          .get(id)
+      )
+        throw new HttpError(
+          409,
+          "This tax type is used by historical transactions and cannot be deleted",
+        );
     }
-  }
-
-  if (!sets.length) return res.status(400).json({ error: "no fields" });
-
-  vals.push(id);
-  db.prepare(`UPDATE ${tbl} SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-
-  logAction(req.user.id, tbl, "EDIT", id);
-
+    db.prepare("DELETE FROM tax_types WHERE id=?").run(id);
+    logAction(req.user.id, "tax_types", "DELETE", id, before, null);
+  })();
   res.json({ ok: true });
-});
-
-app.delete("/api/ledger/:type/:id", authRequired, superAdminOnly, (req, res) => {
-  const tbl = tableFor(req.params.type);
-  if (!tbl) return res.status(400).json({ error: "invalid type" });
-
-  const id = Number(req.params.id);
-  db.prepare(`DELETE FROM ${tbl} WHERE id=?`).run(id);
-
-  logAction(req.user.id, tbl, "DELETE", id);
-
-  res.json({ ok: true });
-});
-
-// DEPARTMENTAL COMBINED
-
-app.get("/api/departmental", authRequired, (req, res) => {
-  const include = (
-    req.query.include || "general,unofficial,association,departmental"
-  )
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-
-  let rows = [];
-
-  if (include.includes("general")) {
-    rows = rows.concat(
-      db.prepare(`
-        SELECT 'general' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
-        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
-        FROM general_ledger l
-        LEFT JOIN tax_types t ON l.tax_type_id=t.id
-      `).all()
-    );
-  }
-
-  if (include.includes("unofficial")) {
-    rows = rows.concat(
-      db.prepare(`
-        SELECT 'unofficial' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
-        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
-        FROM unofficial_ledger l
-        LEFT JOIN tax_types t ON l.tax_type_id=t.id
-      `).all()
-    );
-  }
-
-  if (include.includes("association")) {
-    rows = rows.concat(
-      db.prepare(`
-        SELECT 'association' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
-        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
-        FROM association_ledger l
-        LEFT JOIN tax_types t ON l.tax_type_id=t.id
-      `).all()
-    );
-  }
-
-  if (include.includes("departmental")) {
-    rows = rows.concat(
-      db.prepare(`
-        SELECT 'departmental' AS _src, l.id,l.no,l.date,l.voucher_no,l.deposit,l.cost,l.description,l.signature,
-        l.tax_type_id AS taxTypeId,t.name AS taxTypeName,t.percentage AS taxPercentage
-        FROM departmental_ledger l
-        LEFT JOIN tax_types t ON l.tax_type_id=t.id
-      `).all()
-    );
-  }
-
-  rows = rows.map((r) => ({
-    ...r,
-    deposit: r.deposit == null ? null : Number(r.deposit),
-    cost: r.cost == null ? null : Number(r.cost),
-    voucherNo: r.voucher_no,
-  }));
-
-  rows.sort((a, b) => {
-    if (a.date < b.date) return -1;
-    if (a.date > b.date) return 1;
-    return String(a.no).localeCompare(String(b.no));
-  });
-
-  rows = rows.map((r, i) => ({ ...r, combinedNo: i + 1 }));
-
-  res.json(rows);
 });
 
 // TAX RETURN CHALLAN
 
 app.get("/api/tax-return-challan", authRequired, (_req, res) => {
   const rows = db
-    .prepare(`
+    .prepare(
+      `
       SELECT *
       FROM tax_return_challans
       ORDER BY created_at DESC, id DESC
-    `)
+    `,
+    )
     .all();
   res.json(rows);
 });
@@ -531,62 +423,70 @@ app.post("/api/tax-return-challan", authRequired, (req, res) => {
   } = req.body || {};
 
   if (!challanNo || !taxType || !taxPeriod) {
-    return res.status(400).json({ error: "challanNo, taxType and taxPeriod are required" });
+    return res
+      .status(400)
+      .json({ error: "challanNo, taxType and taxPeriod are required" });
   }
 
   if (!bankBranch || !accountHead || amount == null || amount === "") {
-    return res.status(400).json({ error: "bankBranch, accountHead and amount are required" });
+    return res
+      .status(400)
+      .json({ error: "bankBranch, accountHead and amount are required" });
   }
 
-  const out = db
-    .prepare(`
-      INSERT INTO tax_return_challans (
-        challan_no,
-        date_day,
-        date_month,
-        date_year,
-        zone,
-        circle,
-        tax_type,
-        tax_period,
-        depositor_name,
-        depositor_tin,
-        depositor_address,
-        bank_branch,
-        account_head,
-        amount_words,
-        amount,
-        phone,
-        officer_name,
-        note,
-        extra_comment,
-        created_by
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `)
-    .run(
-      String(challanNo || ""),
-      String(date?.day || ""),
-      String(date?.month || ""),
-      String(date?.year || ""),
-      String(zone || ""),
-      String(circle || ""),
-      String(taxType || ""),
-      String(taxPeriod || ""),
-      String(depositor?.name || ""),
-      String(depositor?.tin || ""),
-      String(depositor?.address || ""),
-      String(bankBranch || ""),
-      String(accountHead || ""),
-      String(amountWords || ""),
-      Number(amount),
-      String(depositor?.phone || ""),
-      String(officerName || ""),
-      String(note || ""),
-      String(extraComment || ""),
-      req.user.id
-    );
-
-  logAction(req.user.id, "tax_return_challans", "ADD", out.lastInsertRowid);
+  const out = db.transaction(() => {
+    const out = db
+      .prepare(
+        `
+        INSERT INTO tax_return_challans (
+          challan_no,
+          date_day,
+          date_month,
+          date_year,
+          zone,
+          circle,
+          tax_type,
+          tax_period,
+          depositor_name,
+          depositor_tin,
+          depositor_address,
+          bank_branch,
+          account_head,
+          amount_words,
+          amount,
+          phone,
+          officer_name,
+          note,
+          extra_comment,
+          created_by
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `,
+      )
+      .run(
+        String(challanNo || ""),
+        String(date?.day || ""),
+        String(date?.month || ""),
+        String(date?.year || ""),
+        String(zone || ""),
+        String(circle || ""),
+        String(taxType || ""),
+        String(taxPeriod || ""),
+        String(depositor?.name || ""),
+        String(depositor?.tin || ""),
+        String(depositor?.address || ""),
+        String(bankBranch || ""),
+        String(accountHead || ""),
+        String(amountWords || ""),
+        Number(amount),
+        String(depositor?.phone || ""),
+        String(officerName || ""),
+        String(note || ""),
+        String(extraComment || ""),
+        req.user.id,
+      );
+    logAction(req.user.id, "tax_return_challans", "ADD", out.lastInsertRowid);
+    return out;
+  })();
 
   res.json({ ok: true, id: out.lastInsertRowid });
 });
@@ -608,13 +508,15 @@ function mapSubmission(row) {
 
 function pendingCountForUser(userId) {
   const row = db
-    .prepare(`
+    .prepare(
+      `
       SELECT COUNT(*) AS count FROM instructions i
       WHERE NOT EXISTS (
         SELECT 1 FROM instruction_submissions s
         WHERE s.instruction_id = i.id AND s.submitted_by = ?
       )
-    `)
+    `,
+    )
     .get(userId);
   return row?.count ?? 0;
 }
@@ -631,22 +533,26 @@ app.get("/api/instructions", authRequired, (req, res) => {
   const userId = req.user.id;
 
   const instructions = db
-    .prepare(`
-      SELECT i.id, i.title, i.description, i.created_at, i.created_by,
+    .prepare(
+      `
+      SELECT i.id, i.title, i.description, i.created_at, i.created_by, i.due_date,
              u.name AS createdByName
       FROM instructions i
       LEFT JOIN users u ON i.created_by = u.id
       ORDER BY i.created_at DESC, i.id DESC
-    `)
+    `,
+    )
     .all();
 
   const submissions = db
-    .prepare(`
+    .prepare(
+      `
       SELECT s.*, u.name AS submittedByName
       FROM instruction_submissions s
       LEFT JOIN users u ON s.submitted_by = u.id
       ORDER BY s.submitted_at DESC
-    `)
+    `,
+    )
     .all();
 
   const mapped = instructions.map((i) => {
@@ -660,6 +566,7 @@ app.get("/api/instructions", authRequired, (req, res) => {
       title: i.title,
       description: i.description,
       createdAt: i.created_at,
+      dueDate: i.due_date || "",
       createdByName: i.createdByName || "",
       mySubmitted: !!mine,
       mySubmission: mine || null,
@@ -678,42 +585,85 @@ app.post("/api/instructions", authRequired, superAdminOnly, (req, res) => {
   const descStr = String(description || "").trim();
 
   if (!titleStr) return res.status(400).json({ error: "title is required" });
-  if (!descStr) return res.status(400).json({ error: "description is required" });
+  if (!descStr)
+    return res.status(400).json({ error: "description is required" });
+  const dueDate = req.body.dueDate ? dateValue(req.body.dueDate) : null;
 
-  const out = db
-    .prepare(
-      `INSERT INTO instructions (title, description, created_by) VALUES (?,?,?)`
-    )
-    .run(titleStr, descStr, req.user.id);
-
-  logAction(req.user.id, "instructions", "ADD", out.lastInsertRowid);
+  const out = db.transaction(() => {
+    const out = db
+      .prepare(
+        `INSERT INTO instructions (title, description, created_by, due_date) VALUES (?,?,?,?)`,
+      )
+      .run(titleStr, descStr, req.user.id, dueDate);
+    logAction(req.user.id, "instructions", "ADD", out.lastInsertRowid);
+    return out;
+  })();
   res.json({ ok: true, id: out.lastInsertRowid });
 });
 
-app.delete("/api/instructions/:id", authRequired, superAdminOnly, (req, res) => {
-  const id = Number(req.params.id);
-  db.prepare(`DELETE FROM instructions WHERE id=?`).run(id);
-  logAction(req.user.id, "instructions", "DELETE", id);
+app.patch("/api/instructions/:id/due-date", authRequired, superAdminOnly, (req, res) => {
+  db.transaction(() => {
+    const before = db.prepare("SELECT * FROM instructions WHERE id=?").get(Number(req.params.id));
+    if (!before) throw new HttpError(404, "Instruction not found");
+    const dueDate = req.body.dueDate ? dateValue(req.body.dueDate) : null;
+    db.prepare("UPDATE instructions SET due_date=? WHERE id=?").run(dueDate, before.id);
+    logAction(req.user.id, "instructions", "EDIT_DUE_DATE", before.id, before, { ...before, due_date: dueDate }, "Instruction deadline updated");
+  })();
   res.json({ ok: true });
 });
 
-app.get("/api/instructions/:id/submissions", authRequired, superAdminOnly, (req, res) => {
-  const rows = db
-    .prepare(`
+app.delete(
+  "/api/instructions/:id",
+  authRequired,
+  superAdminOnly,
+  (req, res) => {
+    const id = Number(req.params.id);
+    db.transaction(() => {
+      const before = db
+        .prepare("SELECT * FROM instructions WHERE id=?")
+        .get(id);
+      if (!before) throw new HttpError(404, "Instruction not found");
+      db.prepare("DELETE FROM instructions WHERE id=?").run(id);
+      logAction(
+        req.user.id,
+        "instructions",
+        "DELETE",
+        id,
+        before,
+        null,
+        "Instruction removed",
+      );
+    })();
+    res.json({ ok: true });
+  },
+);
+
+app.get(
+  "/api/instructions/:id/submissions",
+  authRequired,
+  superAdminOnly,
+  (req, res) => {
+    const rows = db
+      .prepare(
+        `
       SELECT s.*, u.name AS submittedByName
       FROM instruction_submissions s
       LEFT JOIN users u ON s.submitted_by = u.id
       WHERE s.instruction_id = ?
       ORDER BY s.submitted_at DESC
-    `)
-    .all(Number(req.params.id));
+    `,
+      )
+      .all(Number(req.params.id));
 
-  res.json(rows.map(mapSubmission));
-});
+    res.json(rows.map(mapSubmission));
+  },
+);
 
 app.post("/api/instructions/:id/submit", authRequired, (req, res) => {
   if (req.user.role === "super_admin") {
-    return res.status(403).json({ error: "Chairman cannot submit instructions" });
+    return res
+      .status(403)
+      .json({ error: "Chairman cannot submit instructions" });
   }
 
   const instructionId = Number(req.params.id);
@@ -727,7 +677,7 @@ app.post("/api/instructions/:id/submit", authRequired, (req, res) => {
 
   const existing = db
     .prepare(
-      `SELECT id FROM instruction_submissions WHERE instruction_id=? AND submitted_by=?`
+      `SELECT id FROM instruction_submissions WHERE instruction_id=? AND submitted_by=?`,
     )
     .get(instructionId, req.user.id);
 
@@ -742,33 +692,57 @@ app.post("/api/instructions/:id/submit", authRequired, (req, res) => {
     return res.status(400).json({ error: "File is too large (max ~6MB)" });
   }
 
-  const out = db
-    .prepare(`
-      INSERT INTO instruction_submissions (instruction_id, submitted_by, note, file_name, file_data)
-      VALUES (?,?,?,?,?)
-    `)
-    .run(
-      instructionId,
+  const out = db.transaction(() => {
+    const out = db
+      .prepare(
+        `
+        INSERT INTO instruction_submissions (instruction_id, submitted_by, note, file_name, file_data)
+        VALUES (?,?,?,?,?)
+      `,
+      )
+      .run(
+        instructionId,
+        req.user.id,
+        String(note || "").trim(),
+        fileName ? String(fileName).trim() : null,
+        dataStr || null,
+      );
+    logAction(
       req.user.id,
-      String(note || "").trim(),
-      fileName ? String(fileName).trim() : null,
-      dataStr || null
+      "instruction_submissions",
+      "ADD",
+      out.lastInsertRowid,
     );
-
-  logAction(req.user.id, "instruction_submissions", "ADD", out.lastInsertRowid);
+    return out;
+  })();
   res.json({ ok: true, id: out.lastInsertRowid });
 });
 
 // DASHBOARD
 
 app.get("/api/dashboard/stats", authRequired, (req, res) => {
-  const ledgers = ["general_ledger", "unofficial_ledger", "association_ledger", "departmental_ledger"];
+  const ledgers = [
+    "general_ledger",
+    "unofficial_ledger",
+    "association_ledger",
+    "departmental_ledger",
+  ];
   let totalDeposits = 0;
   let totalCosts = 0;
+  const openingBalance =
+    db
+      .prepare(
+        "SELECT COALESCE(SUM(amount_minor),0) AS total FROM ledger_openings",
+      )
+      .get().total / 100;
 
-  ledgers.forEach(tbl => {
-    const d = db.prepare(`SELECT SUM(deposit) as sum FROM ${tbl}`).get();
-    const c = db.prepare(`SELECT SUM(cost) as sum FROM ${tbl}`).get();
+  ledgers.forEach((tbl) => {
+    const d = db
+      .prepare(`SELECT SUM(deposit_minor)/100.0 as sum FROM ${tbl}`)
+      .get();
+    const c = db
+      .prepare(`SELECT SUM(cost_minor)/100.0 as sum FROM ${tbl}`)
+      .get();
     totalDeposits += d?.sum || 0;
     totalCosts += c?.sum || 0;
   });
@@ -783,9 +757,11 @@ app.get("/api/dashboard/stats", authRequired, (req, res) => {
     expense: 0,
   }));
 
-  ledgers.forEach(tbl => {
-    const rows = db.prepare(`SELECT deposit, cost, date FROM ${tbl} WHERE date LIKE ?`).all(`${currentYear}-%`);
-    rows.forEach(r => {
+  ledgers.forEach((tbl) => {
+    const rows = db
+      .prepare(`SELECT deposit, cost, date FROM ${tbl} WHERE date LIKE ?`)
+      .all(`${currentYear}-%`);
+    rows.forEach((r) => {
       const m = parseInt(r.date.split("-")[1], 10) - 1;
       if (m >= 0 && m < 12) {
         months[m].income += r.deposit || 0;
@@ -796,22 +772,26 @@ app.get("/api/dashboard/stats", authRequired, (req, res) => {
 
   // Recent Transactions
   let recent = [];
-  ledgers.forEach(tbl => {
+  ledgers.forEach((tbl) => {
     const type = tbl.split("_")[0];
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT l.*, u.name as addedByName
       FROM ${tbl} l
       LEFT JOIN users u ON l.created_by = u.id
       ORDER BY l.date DESC, l.id DESC LIMIT 10
-    `).all();
-    rows.forEach(r => {
+    `,
+      )
+      .all();
+    rows.forEach((r) => {
       recent.push({
         id: r.id,
         date: r.date,
         type: type.charAt(0).toUpperCase() + type.slice(1),
         description: r.description,
         amount: r.deposit ? r.deposit : -r.cost,
-        addedBy: r.addedByName || "Unknown"
+        addedBy: r.addedByName || "Unknown",
       });
     });
   });
@@ -821,12 +801,16 @@ app.get("/api/dashboard/stats", authRequired, (req, res) => {
   // Pending Approvals (for super_admin)
   let pendingApprovals = 0;
   if (req.user.role === "super_admin") {
-    const row = db.prepare("SELECT COUNT(*) as count FROM users WHERE approved=0").get();
+    const row = db
+      .prepare("SELECT COUNT(*) as count FROM users WHERE approved=0")
+      .get();
     pendingApprovals = row?.count || 0;
   }
 
   // Pending Instructions Card data
-  const pendingInstructionsList = db.prepare(`
+  const pendingInstructionsList = db
+    .prepare(
+      `
     SELECT i.id, i.title, i.created_at
     FROM instructions i
     WHERE NOT EXISTS (
@@ -834,13 +818,34 @@ app.get("/api/dashboard/stats", authRequired, (req, res) => {
       WHERE s.instruction_id = i.id AND s.submitted_by = ?
     )
     LIMIT 5
-  `).all(req.user.id);
+  `,
+    )
+    .all(req.user.id);
+
+  const currentDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const currentPeriod = db
+    .prepare(
+      "SELECT id,name FROM financial_periods WHERE ? BETWEEN start_date AND end_date",
+    )
+    .get(currentDate);
+  const budgetOverview = currentPeriod
+    ? {
+        ...finance.budgetReport(currentPeriod.id),
+        periodName: currentPeriod.name,
+      }
+    : null;
 
   res.json({
+    budgetOverview,
     kpis: {
       totalDeposits,
       totalCosts,
-      netBalance: totalDeposits - totalCosts,
+      netBalance: openingBalance + totalDeposits - totalCosts,
       pendingInstructionsCount,
     },
     chartData: months,
@@ -850,7 +855,26 @@ app.get("/api/dashboard/stats", authRequired, (req, res) => {
   });
 });
 
-const port = process.env.PORT || 4000;
-app.listen(port, () => {
-  console.log(`🚀 API running at http://localhost:${port}`);
+app.use((error, _req, res, _next) => {
+  if (error instanceof HttpError)
+    return res.status(error.status).json({ error: error.message });
+  if (error.code?.startsWith("SQLITE_CONSTRAINT"))
+    return res.status(409).json({
+      error: "This item is already in use or conflicts with another record.",
+    });
+  if (error.type === "entity.too.large")
+    return res.status(413).json({ error: "The uploaded request is too large" });
+  if (error instanceof SyntaxError)
+    return res.status(400).json({ error: "Invalid request data" });
+  console.error(error);
+  res.status(500).json({ error: "The request could not be completed" });
 });
+
+if (process.env.NODE_ENV !== "test") {
+  const port = process.env.PORT || 4000;
+  app.listen(port, () =>
+    console.log(`API running at http://localhost:${port}`),
+  );
+  if (process.env.DISABLE_BACKUP_SCHEDULER !== "true") backups.start();
+}
+export { app, db, finance, backups };

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 export default function Profile() {
-  const { user, updateProfile, refreshMe } = useAuth();
+  const { user, updateProfile, refreshMe, logout } = useAuth();
   const [activeTab, setActiveTab] = useState("edit");
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   const fileInputRef = useRef(null);
@@ -136,6 +136,7 @@ export default function Profile() {
       });
       setPassMsg({ message: "Password changed successfully!", type: "success" });
       setPassForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      logout();
     } catch (err) {
       setPassMsg({ message: err.message || "Failed to change password.", type: "error" });
     } finally {

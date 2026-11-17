@@ -18,19 +18,25 @@ import Profile from "./pages/Profile.jsx";
 import TaxReturnChallanPage from "./pages/TaxReturnChallanPage.jsx";
 import InstructionsPage from "./pages/InstructionsPage.jsx";
 import ReportsPage from "./pages/ReportsPage.jsx";
+import BudgetsPage from "./pages/BudgetsPage.jsx";
+import PeriodsPage from "./pages/PeriodsPage.jsx";
+import DataToolsPage from "./pages/DataToolsPage.jsx";
+import AssistantPage from "./pages/AssistantPage.jsx";
+import AssistantWidget from "./components/AssistantWidget.jsx";
+import BatchReceiptsPage from "./pages/BatchReceiptsPage.jsx";
+import { NotificationBell, NotificationsPage } from "./components/Notifications.jsx";
 import logoImg from "./assets/logo.png";
 import uniBg from "./assets/uni.png";
-import { Bell, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 export default function App() {
   const { user, logout } = useAuth();
   const [instructionBadge, setInstructionBadge] = useState(0);
   const [pendingApprovals, setPendingApprovals] = useState(0);
-  const [showNotifications, setShowNotifications] = useState(false);
 
   const refreshBadges = async () => {
     if (!user) return;
-    
+
     if (user.role === "official") {
       try {
         const { count } = await api.getInstructionsPendingCount();
@@ -62,12 +68,13 @@ export default function App() {
     return () => window.removeEventListener("instructions-updated", onUpdate);
   }, [user]);
 
-  const badgeCount = user?.role === "super_admin" ? pendingApprovals : instructionBadge;
+  const badgeCount =
+    user?.role === "super_admin" ? pendingApprovals : instructionBadge;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      <a 
-        href="#main-content" 
+      <a
+        href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-white focus:px-4 focus:py-2 focus:rounded focus:shadow focus:text-sm focus:font-medium"
       >
         Skip to main content
@@ -82,77 +89,25 @@ export default function App() {
 
       <div className="relative z-10">
         <header className="sticky top-0 bg-white border-b shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex shrink-0 items-center gap-3">
               <img
                 src={logoImg}
                 alt="App Logo"
                 className="w-10 h-10 object-contain"
               />
-              <div className="font-semibold text-lg">Ledger Book</div>
+              <div className="whitespace-nowrap font-semibold text-lg">Ledger Book</div>
             </div>
 
             {user ? (
-              <div className="flex items-center gap-4">
-                {/* Notification Bell */}
-                <div className="relative">
-                  <button 
-                    onClick={() => setShowNotifications(!showNotifications)}
-                    className="p-2 rounded-full hover:bg-slate-100 transition relative"
-                    aria-label="Notifications"
-                    aria-haspopup="true"
-                    aria-expanded={showNotifications}
-                  >
-                    <Bell size={22} className="text-slate-600" />
-                    {badgeCount > 0 && (
-                      <span className="absolute top-1 right-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border-2 border-white">
-                        {badgeCount}
-                      </span>
-                    )}
-                  </button>
+              <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:gap-4">
+                <NotificationBell />
 
-                  {showNotifications && (
-                    <div 
-                      role="dialog" 
-                      aria-modal="true" 
-                      aria-label="Notifications panel"
-                      className="absolute right-0 mt-2 w-72 bg-white border rounded-lg shadow-xl z-50 overflow-hidden"
-                    >
-                      <div className="p-3 border-b bg-slate-50 font-semibold text-sm">Notifications</div>
-                      <div className="max-h-80 overflow-y-auto">
-                        {user.role === "super_admin" && pendingApprovals > 0 && (
-                          <NavLink 
-                            to="/admin/users" 
-                            onClick={() => setShowNotifications(false)}
-                            className="block p-4 hover:bg-slate-50 border-b last:border-0"
-                          >
-                            <div className="text-sm font-medium">Pending Approvals</div>
-                            <div className="text-xs text-slate-500 mt-1">{pendingApprovals} user(s) waiting for approval.</div>
-                          </NavLink>
-                        )}
-                        {user.role === "official" && instructionBadge > 0 && (
-                          <NavLink 
-                            to="/instructions" 
-                            onClick={() => setShowNotifications(false)}
-                            className="block p-4 hover:bg-slate-50 border-b last:border-0"
-                          >
-                            <div className="text-sm font-medium">Pending Instructions</div>
-                            <div className="text-xs text-slate-500 mt-1">You have {instructionBadge} instruction(s) to complete.</div>
-                          </NavLink>
-                        )}
-                        {badgeCount === 0 && (
-                          <div className="p-8 text-center text-slate-400 text-sm">No new notifications</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-5 border-l pl-4">
+                <div className="flex items-center gap-3 border-l pl-3 sm:gap-5 sm:pl-4">
                   <img
                     src={user.pictureUrl || logoImg}
                     alt="Profile"
-                    className="w-10 h-10 rounded-full object-cover border"
+                    className="hidden h-10 w-10 rounded-full object-cover border sm:block"
                     onError={(e) => {
                       e.currentTarget.src = logoImg;
                     }}
@@ -183,16 +138,52 @@ export default function App() {
           </div>
 
           {user && (
-            <nav className="bg-slate-100/70 border-t" aria-label="Main navigation">
-              <ul role="list" className="max-w-7xl mx-auto px-4 py-2 flex gap-4 flex-wrap list-none">
-                <li><Tab to="/dashboard" label="Dashboard" /></li>
-                <li><Tab to="/general-ledger" label="General Ledger" /></li>
-                <li><Tab to="/unofficial-ledger" label="Unofficial Ledger" /></li>
-                <li><Tab to="/student-association" label="Student Association" /></li>
-                <li><Tab to="/department-ledger" label="Department Ledger" /></li>
-                <li><Tab to="/departmental-cost" label="Departmental Cost" /></li>
-                <li><Tab to="/reports" label="Reports" /></li>
-                <li><Tab to="/tax-return-challan" label="Tax Return Challan" /></li>
+            <nav
+              className="bg-slate-100/70 border-t"
+              aria-label="Main navigation"
+            >
+              <ul
+                role="list"
+                className="max-w-7xl mx-auto px-4 py-2 flex gap-2 flex-nowrap overflow-x-auto list-none sm:gap-4 sm:flex-wrap sm:overflow-visible"
+              >
+                <li>
+                  <Tab to="/dashboard" label="Dashboard" />
+                </li>
+                <li>
+                  <Tab to="/ai-assistant" label="AI Assistant" />
+                </li>
+                <li><Tab to="/receipt-batch" label="Batch Receipts" /></li>
+                <li><Tab to="/notifications" label="Reminders" /></li>
+                <li>
+                  <Tab to="/general-ledger" label="General Ledger" />
+                </li>
+                <li>
+                  <Tab to="/unofficial-ledger" label="Unofficial Ledger" />
+                </li>
+                <li>
+                  <Tab to="/student-association" label="Student Association" />
+                </li>
+                <li>
+                  <Tab to="/department-ledger" label="Department Ledger" />
+                </li>
+                <li>
+                  <Tab to="/departmental-cost" label="Departmental Cost" />
+                </li>
+                <li>
+                  <Tab to="/reports" label="Reports" />
+                </li>
+                <li>
+                  <Tab to="/budgets" label="Budgets & Categories" />
+                </li>
+                <li>
+                  <Tab to="/financial-periods" label="Financial Periods" />
+                </li>
+                <li>
+                  <Tab to="/data-tools" label="Data Tools" />
+                </li>
+                <li>
+                  <Tab to="/tax-return-challan" label="Tax Return Challan" />
+                </li>
                 <li>
                   <Tab
                     to="/instructions"
@@ -202,8 +193,12 @@ export default function App() {
                 </li>
                 {user.role === "super_admin" && (
                   <>
-                    <li><Tab to="/tax" label="Tax" /></li>
-                    <li><Tab to="/log-book" label="Log Book" /></li>
+                    <li>
+                      <Tab to="/tax" label="Tax" />
+                    </li>
+                    <li>
+                      <Tab to="/log-book" label="Audit History" />
+                    </li>
                   </>
                 )}
               </ul>
@@ -211,13 +206,15 @@ export default function App() {
           )}
         </header>
 
-        <main id="main-content" aria-label="Page content" className="max-w-7xl mx-auto px-4 py-6">
+        <main
+          id="main-content"
+          aria-label="Page content"
+          className="max-w-7xl mx-auto px-4 py-6"
+        >
           <Routes>
             <Route
               path="/"
-              element={
-                user ? <Navigate to="/dashboard" replace /> : <Login />
-              }
+              element={user ? <Navigate to="/dashboard" replace /> : <Login />}
             />
             <Route
               path="/dashboard"
@@ -323,9 +320,44 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/budgets"
+              element={
+                <ProtectedRoute>
+                  <BudgetsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/financial-periods"
+              element={
+                <ProtectedRoute>
+                  <PeriodsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/data-tools"
+              element={
+                <ProtectedRoute>
+                  <DataToolsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/ai-assistant"
+              element={
+                <ProtectedRoute>
+                  <AssistantPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/receipt-batch" element={<ProtectedRoute><BatchReceiptsPage /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
+        {user && <AssistantWidget />}
       </div>
     </div>
   );
@@ -336,9 +368,9 @@ function Tab({ to, label, badge = 0 }) {
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `relative w-64 h-14 flex items-center justify-center px-4 rounded-xl text-[14px] font-bold uppercase tracking-wider transition-all duration-200 shrink-0 ${
-          isActive 
-            ? "bg-slate-900 text-white shadow-xl shadow-slate-200 scale-105 z-10" 
+        `relative flex items-center justify-center px-3 py-2 rounded-lg text-[12px] font-semibold transition-all duration-200 shrink-0 ${
+          isActive
+            ? "bg-slate-900 text-white shadow-xl shadow-slate-200 scale-105 z-10"
             : "text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-md"
         }`
       }

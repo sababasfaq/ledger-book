@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
 const AuthContext = createContext(null);
@@ -6,7 +6,11 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     const raw = localStorage.getItem("user");
-    return raw ? JSON.parse(raw) : null;
+    try {
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
   });
 
   const signup = (payload) => api.signup(payload);
@@ -62,6 +66,26 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  useEffect(() => {
+    const expired = () => logout();
+    window.addEventListener("session-expired", expired);
+    let active = true;
+    if (localStorage.getItem("token"))
+      api
+        .getMe()
+        .then((me) => {
+          if (active) {
+            localStorage.setItem("user", JSON.stringify(me));
+            setUser(me);
+          }
+        })
+        .catch(() => {});
+    return () => {
+      active = false;
+      window.removeEventListener("session-expired", expired);
+    };
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
@@ -72,7 +96,7 @@ export function AuthProvider({ children }) {
       updateProfile,
       logout,
     }),
-    [user]
+    [user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

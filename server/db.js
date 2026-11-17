@@ -1,9 +1,39 @@
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "node:fs";
+import dotenv from "dotenv";
+import { migrateFinance } from "./finance-schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database(path.join(__dirname, "data.sqlite"));
+dotenv.config();
+const databasePath = process.env.DB_PATH || path.join(__dirname, "data.sqlite");
+const existed = databasePath !== ":memory:" && fs.existsSync(databasePath);
+const db = new Database(databasePath);
+db.pragma("foreign_keys = ON");
+if (
+  existed &&
+  db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'")
+    .get() &&
+  !db
+    .prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='finance_meta'",
+    )
+    .get()
+) {
+  const directory = process.env.BACKUP_DIR || path.join(__dirname, "backups");
+  fs.mkdirSync(directory, { recursive: true });
+  await db.backup(
+    path.join(directory, "before-finance-upgrade-" + Date.now() + ".sqlite"),
+  );
+}
+if (existed && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='finance_meta'").get() &&
+  !db.prepare("SELECT 1 FROM finance_meta WHERE key='receipt_tools_version'").get()) {
+  const directory = process.env.BACKUP_DIR || path.join(__dirname, "backups");
+  fs.mkdirSync(directory, { recursive: true });
+  await db.backup(path.join(directory, "before-assistant-tools-upgrade-" + Date.now() + ".sqlite"));
+}
 db.pragma("journal_mode = WAL");
 
 db.exec(`
@@ -203,7 +233,10 @@ try {
   }
   const hasCreatedAt = userCols.some((c) => c.name === "created_at");
   if (!hasCreatedAt) {
-    db.prepare("ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))").run();
+    db.prepare("ALTER TABLE users ADD COLUMN created_at TEXT").run();
+    db.prepare(
+      "UPDATE users SET created_at=datetime('now','localtime') WHERE created_at IS NULL",
+    ).run();
   }
 } catch (e) {
   console.error("users table migration failed:", e);
@@ -220,20 +253,24 @@ for (const tableName of [
     const hasTaxTypeId = cols.some((c) => c.name === "tax_type_id");
     if (!hasTaxTypeId) {
       db.prepare(
-        `ALTER TABLE ${tableName} ADD COLUMN tax_type_id integer references tax_types(id)`
+        `ALTER TABLE ${tableName} ADD COLUMN tax_type_id integer references tax_types(id)`,
       ).run();
       console.log(`Added tax_type_id to ${tableName}`);
     }
 
     const hasVoucherFileName = cols.some((c) => c.name === "voucher_file_name");
     if (!hasVoucherFileName) {
-      db.prepare(`ALTER TABLE ${tableName} ADD COLUMN voucher_file_name TEXT`).run();
+      db.prepare(
+        `ALTER TABLE ${tableName} ADD COLUMN voucher_file_name TEXT`,
+      ).run();
       console.log(`Added voucher_file_name to ${tableName}`);
     }
 
     const hasVoucherFileData = cols.some((c) => c.name === "voucher_file_data");
     if (!hasVoucherFileData) {
-      db.prepare(`ALTER TABLE ${tableName} ADD COLUMN voucher_file_data TEXT`).run();
+      db.prepare(
+        `ALTER TABLE ${tableName} ADD COLUMN voucher_file_data TEXT`,
+      ).run();
       console.log(`Added voucher_file_data to ${tableName}`);
     }
   } catch (e) {
@@ -242,23 +279,31 @@ for (const tableName of [
 }
 
 try {
-  const challanCols = db.prepare("PRAGMA table_info(tax_return_challans)").all();
+  const challanCols = db
+    .prepare("PRAGMA table_info(tax_return_challans)")
+    .all();
 
   const hasBankName = challanCols.some((c) => c.name === "bank_name");
   if (!hasBankName) {
-    db.prepare("ALTER TABLE tax_return_challans ADD COLUMN bank_name TEXT").run();
+    db.prepare(
+      "ALTER TABLE tax_return_challans ADD COLUMN bank_name TEXT",
+    ).run();
     console.log("Added bank_name to tax_return_challans");
   }
 
   const hasCopyLabel = challanCols.some((c) => c.name === "copy_label");
   if (!hasCopyLabel) {
-    db.prepare("ALTER TABLE tax_return_challans ADD COLUMN copy_label TEXT").run();
+    db.prepare(
+      "ALTER TABLE tax_return_challans ADD COLUMN copy_label TEXT",
+    ).run();
     console.log("Added copy_label to tax_return_challans");
   }
 
   const hasTaxPeriod = challanCols.some((c) => c.name === "tax_period");
   if (!hasTaxPeriod) {
-    db.prepare("ALTER TABLE tax_return_challans ADD COLUMN tax_period TEXT").run();
+    db.prepare(
+      "ALTER TABLE tax_return_challans ADD COLUMN tax_period TEXT",
+    ).run();
     console.log("Added tax_period to tax_return_challans");
   }
 } catch (e) {
@@ -268,10 +313,15 @@ try {
 try {
   db.exec(
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_instruction_submissions_user
-     ON instruction_submissions(instruction_id, submitted_by)`
+     ON instruction_submissions(instruction_id, submitted_by)`,
   );
 } catch (e) {
   console.error("instruction_submissions unique index failed:", e);
 }
+
+migrateFinance(db);
+db.exec(`CREATE TRIGGER IF NOT EXISTS users_created_at_default
+  AFTER INSERT ON users WHEN NEW.created_at IS NULL
+  BEGIN UPDATE users SET created_at=datetime('now','localtime') WHERE id=NEW.id; END;`);
 
 export { db };

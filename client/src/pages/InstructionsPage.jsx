@@ -25,7 +25,7 @@ export default function InstructionsPage() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const [form, setForm] = useState({ title: "", description: "" });
+  const [form, setForm] = useState({ title: "", description: "", dueDate: "" });
   const [submittingId, setSubmittingId] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -57,8 +57,9 @@ export default function InstructionsPage() {
       await api.addInstruction({
         title: form.title.trim(),
         description: form.description.trim(),
+        dueDate: form.dueDate,
       });
-      setForm({ title: "", description: "" });
+      setForm({ title: "", description: "", dueDate: "" });
       await load();
       notifyInstructionsUpdated();
     } catch (e) {
@@ -168,6 +169,7 @@ export default function InstructionsPage() {
           >
             Add Instruction
           </button>
+          <label className="block text-sm">Due date (optional)<input aria-label="Instruction due date" type="date" className="finance-input mt-1" value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} /></label>
         </section>
       )}
 
@@ -235,6 +237,10 @@ export default function InstructionsPage() {
                   key={inst.id}
                   inst={inst}
                   onDelete={() => onDelete(inst.id)}
+                  onDueDate={async (date) => {
+                    try { await api.setInstructionDueDate(inst.id, date); await load(); notifyInstructionsUpdated(); }
+                    catch (failure) { setMsg(failure.message); }
+                  }}
                 />
               ))}
             </div>
@@ -245,7 +251,8 @@ export default function InstructionsPage() {
   );
 }
 
-function ChairmanCard({ inst, onDelete }) {
+function ChairmanCard({ inst, onDelete, onDueDate }) {
+  const [dueDate, setDueDate] = useState(inst.dueDate || "");
   const doneCount = inst.submissions?.length || 0;
 
   return (
@@ -273,6 +280,10 @@ function ChairmanCard({ inst, onDelete }) {
 
       <div className="mt-3 text-sm text-slate-600">
         Completed by {doneCount} office worker{doneCount !== 1 ? "s" : ""}
+      </div>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <label className="text-xs text-slate-600">Due date<input aria-label={`Due date for ${inst.title}`} type="date" className="finance-input mt-1" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
+        <button className="finance-button-secondary" onClick={() => onDueDate(dueDate)}>Save deadline</button>
       </div>
 
       {doneCount > 0 && (
@@ -337,6 +348,7 @@ function OfficerCard({
         From Chairman · {inst.createdAt}
       </p>
 
+      {inst.dueDate && <p className="mt-2 text-sm font-medium text-amber-800">Due {inst.dueDate}</p>}
       {!done && !showForm && (
         <button
           type="button"

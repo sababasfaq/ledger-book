@@ -1,8 +1,8 @@
-import jsPDF from "jspdf";
-import "jspdf-autotable";
-import * as XLSX from "xlsx";
-
-export const exportToPDF = (title, rows, columns) => {
+export const exportToPDF = async (title, rows) => {
+  const [{ jsPDF }, { autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
   const doc = new jsPDF("l", "mm", "a4");
   doc.setFontSize(18);
   doc.text(title, 14, 22);
@@ -16,19 +16,34 @@ export const exportToPDF = (title, rows, columns) => {
     r.description || "",
     r.deposit ? Number(r.deposit).toLocaleString() : "",
     r.cost ? Number(r.cost).toLocaleString() : "",
-    r.netBalance ? Number(r.netBalance).toLocaleString() : "",
+    r.netBalance != null ? Number(r.netBalance).toLocaleString() : "",
+    r.categoryName || "",
+    r.reversalOf ? "Reversal" : r.reversedBy ? "Reversed" : "Posted",
   ]);
 
-  doc.autoTable({
+  autoTable(doc, {
     startY: 40,
-    head: [["No", "Date", "Voucher No", "Description", "Deposit", "Cost", "Balance"]],
+    head: [
+      [
+        "No",
+        "Date",
+        "Voucher No",
+        "Description",
+        "Deposit",
+        "Cost",
+        "Balance",
+        "Category",
+        "Status",
+      ],
+    ],
     body: tableData,
   });
 
   doc.save(`${title.replace(/\s+/g, "_")}_${new Date().getTime()}.pdf`);
 };
 
-export const exportToExcel = (title, rows) => {
+export const exportToExcel = async (title, rows) => {
+  const XLSX = await import("xlsx");
   const data = rows.map((r, i) => ({
     No: i + 1,
     Date: r.date,
@@ -37,6 +52,9 @@ export const exportToExcel = (title, rows) => {
     Deposit: r.deposit || 0,
     Cost: r.cost || 0,
     Balance: r.netBalance || 0,
+    Category: r.categoryName || "",
+    "Tax Type": r.taxTypeName || "",
+    Status: r.reversalOf ? "Reversal" : r.reversedBy ? "Reversed" : "Posted",
   }));
 
   const ws = XLSX.utils.json_to_sheet(data);
@@ -44,12 +62,19 @@ export const exportToExcel = (title, rows) => {
   XLSX.utils.book_append_sheet(wb, ws, "Ledger");
 
   // Auto-fit columns
-  const colWidths = Object.keys(data[0] || {}).map(key => ({
-    wch: Math.max(key.length, ...data.map(r => String(r[key] || "").length)) + 2
+  const colWidths = Object.keys(data[0] || {}).map((key) => ({
+    wch:
+      data.reduce(
+        (width, row) => Math.max(width, String(row[key] ?? "").length),
+        key.length,
+      ) + 2,
   }));
   ws["!cols"] = colWidths;
 
-  XLSX.writeFile(wb, `${title.replace(/\s+/g, "_")}_${new Date().getTime()}.xlsx`);
+  XLSX.writeFile(
+    wb,
+    `${title.replace(/\s+/g, "_")}_${new Date().getTime()}.xlsx`,
+  );
 };
 
 export const fileToBase64 = (file) => {

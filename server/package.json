@@ -5,7 +5,12 @@
   "main": "server.js",
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1",
+    "ai:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local-ai.ps1",
+    "ai:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local-ai.ps1",
+    "ai:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-local-ai.ps1",
+    "ai:verify": "node scripts/verify-local-ai.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -14,6 +19,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "nodemailer": "^6.9.13"
+    "nodemailer": "^6.9.13",
+    "sharp": "^0.35.5",
+    "tesseract.js": "^7.0.0"
   }
 }

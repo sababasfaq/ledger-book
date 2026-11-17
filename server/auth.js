@@ -7,11 +7,21 @@ dotenv.config();
 const JWT_SECRET = process.env.JWT_SECRET;
 
 export const maskEmail = (email) => {
-  const [n,d] = email.split("@"); return `${n.slice(0,2)}****@${d}`;
+  const [n, d] = email.split("@");
+  return `${n.slice(0, 2)}****@${d}`;
 };
 
 export const createToken = (user) =>
-  jwt.sign({ id: user.id, role: user.role, approved: !!user.approved }, JWT_SECRET, { expiresIn: "12h" });
+  jwt.sign(
+    {
+      id: user.id,
+      role: user.role,
+      approved: !!user.approved,
+      tokenVersion: user.token_version || 0,
+    },
+    JWT_SECRET,
+    { expiresIn: "12h" },
+  );
 
 export async function hashPassword(p) {
   const salt = await bcrypt.genSalt(10);
@@ -22,11 +32,17 @@ export async function verifyPassword(p, hash) {
 }
 
 export const saveOtp = (email, code, ttlSeconds = 600) => {
-  const expires = Date.now() + ttlSeconds*1000;
-  db.prepare(`insert into otps (email,code,expires_at) values (?,?,?)`).run(email, code, expires);
+  const expires = Date.now() + ttlSeconds * 1000;
+  db.prepare(`insert into otps (email,code,expires_at) values (?,?,?)`).run(
+    email,
+    code,
+    expires,
+  );
 };
 export const checkOtp = (email, code) => {
-  const rec = db.prepare(`select * from otps where email=? order by expires_at desc`).get(email);
+  const rec = db
+    .prepare(`select * from otps where email=? order by expires_at desc`)
+    .get(email);
   if (!rec) return false;
   if (rec.code !== code) return false;
   if (Date.now() > rec.expires_at) return false;
